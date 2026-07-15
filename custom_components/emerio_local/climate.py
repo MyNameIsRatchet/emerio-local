@@ -22,7 +22,7 @@ from .mapping import (
     DP_SLEEP,
     DP_TARGET_TEMPERATURE,
     FAN_TO_TUYA,
-    HVAC_TO_TUYA,
+    hvac_write_sequence,
 )
 
 
@@ -110,9 +110,10 @@ class EmerioClimate(EmerioEntity, ClimateEntity):
         if hvac_mode == HVACMode.OFF:
             await self.async_turn_off()
             return
-        await self.device.async_write_dps(
-            {DP_POWER: True, DP_HVAC_MODE: HVAC_TO_TUYA[hvac_mode.value]}
-        )
+        # This Emerio firmware accepts the individual DPs but ignores the mode
+        # when power and mode are combined in one Tuya command.
+        for dps in hvac_write_sequence(self.device.state.power, hvac_mode.value):
+            await self.device.async_write_dps(dps)
 
     async def async_set_temperature(self, **kwargs) -> None:
         temperature = kwargs.get(ATTR_TEMPERATURE)

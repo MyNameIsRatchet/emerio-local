@@ -45,6 +45,17 @@ FAN_TO_TUYA = {
 TUYA_TO_FAN = {value: key for key, value in FAN_TO_TUYA.items()}
 
 
+def hvac_write_sequence(
+    powered: bool, hvac_mode: str
+) -> tuple[dict[int, Any], ...]:
+    """Build single-DP writes for firmwares that reject combined mode commands."""
+
+    mode_write = {DP_HVAC_MODE: HVAC_TO_TUYA[hvac_mode]}
+    if powered:
+        return (mode_write,)
+    return ({DP_POWER: True}, mode_write)
+
+
 @dataclass(slots=True)
 class EmerioState:
     """The best state currently known to Home Assistant."""
