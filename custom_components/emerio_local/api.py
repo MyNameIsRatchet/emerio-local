@@ -59,6 +59,7 @@ class EmerioDevice:
         self.last_error: str | None = None
 
         self._lock = asyncio.Lock()
+        self._monitor_lock = asyncio.Lock()
         self._listeners: set[Callable[[], None]] = set()
         self._status_waiters: set[asyncio.Future[None]] = set()
         self._pending_dps: dict[int, Any] = {}
@@ -88,6 +89,14 @@ class EmerioDevice:
         """Open a persistent Tuya 3.4 session and start listening for pushes."""
 
         self._stopping = False
+        await self._async_start_monitor_transport()
+        self._poll_task = self.hass.async_create_background_task(
+            self._async_poll_loop(), f"emerio_local_poll_{self.device_id}"
+        )
+
+    async def _async_start_monitor_transport(self) -> bool:
+        """Create the persistent monitor without changing the poll task."""
+
         self._monitor_device = self._new_tuya_device(timeout=3.0, persist=True)
         self._monitor_device.set_dpsUsed({str(dp): None for dp in KNOWN_DPS})
         self._monitor = tinytuya.Monitor(
@@ -116,7 +125,7 @@ class EmerioDevice:
             self._monitor = None
             self._monitor_device = None
             self._notify()
-            return
+            return False
 
         self._monitor_registered = True
         self.monitor_connected = True
@@ -128,9 +137,7 @@ class EmerioDevice:
         # The first query lets TinyTuya detect device22. The second query uses
         # that detected format; UPDATEDPS is an additional firmware-specific path.
         self._schedule_status_sequence()
-        self._poll_task = self.hass.async_create_background_task(
-            self._async_poll_loop(), f"emerio_local_poll_{self.device_id}"
-        )
+        return True
 
     async def async_stop(self) -> None:
         """Stop background work and close the persistent socket."""
@@ -216,12 +223,39 @@ class EmerioDevice:
         self._schedule_status_sequence(force=True)
         try:
             await asyncio.wait_for(waiter, timeout=_STATUS_TIMEOUT)
-        except TimeoutError as err:
-            self.last_error = "Statusabfrage: Gerät lieferte keine Datenpunkte"
-            self._notify()
-            raise EmerioCommunicationError(self.last_error) from err
+        except TimeoutError:
+            await self._async_recover_monitor_status()
         finally:
             self._status_waiters.discard(waiter)
+
+    async def _async_recover_monitor_status(self) -> None:
+        """Recover a stale monitor after the appliance lost mains power."""
+
+        async with self._monitor_lock:
+            status_task = self._status_task
+            if status_task is not None and not status_task.done():
+                status_task.cancel()
+                await asyncio.gather(status_task, return_exceptions=True)
+            self._status_task = None
+
+            if self._monitor is not None:
+                await self.hass.async_add_executor_job(self._stop_monitor_sync)
+            self._monitor = None
+            self._monitor_device = None
+            self._monitor_registered = False
+            self.monitor_connected = False
+            self.command_reachable = False
+
+            try:
+                dps = await self.hass.async_add_executor_job(self._refresh_sync)
+            except Exception as err:
+                self.last_error = f"Statusabfrage: {err}"
+                self._notify()
+                await self._async_start_monitor_transport()
+                raise EmerioCommunicationError(self.last_error) from err
+
+            self._apply_device_dps(dps)
+            await self._async_start_monitor_transport()
 
     async def async_wait_for_device_dp(
         self, dp: int, expected: Any, timeout: float = 2.0
@@ -377,7 +411,24 @@ class EmerioDevice:
         try:
             while True:
                 await asyncio.sleep(_POLL_INTERVAL)
-                self._schedule_status_sequence()
+                if self._monitor_registered:
+                    self._schedule_status_sequence()
+                    continue
+
+                async with self._monitor_lock:
+                    if self._monitor_registered:
+                        continue
+                    try:
+                        dps = await self.hass.async_add_executor_job(
+                            self._refresh_sync
+                        )
+                    except Exception as err:
+                        self.command_reachable = False
+                        self.last_error = f"Statusabfrage: {err}"
+                        self._notify()
+                        continue
+                    self._apply_device_dps(dps)
+                    await self._async_start_monitor_transport()
         except asyncio.CancelledError:
             raise
 

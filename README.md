@@ -47,6 +47,8 @@ Ausschaltbefehl mehr anbietet.
   nur vorübergehend optimistischen UI-Zustand.
 - **Robuster Reconnect:** Bei einem Verbindungsabbruch werden ausstehende
   Datenpunkte vorgemerkt und nach dem Wiederaufbau übertragen.
+- **Erholung nach Netztrennung:** Ein nach Shelly- oder Stromtrennung veralteter
+  Monitor wird durch eine echte Statusabfrage erkannt und sauber neu aufgebaut.
 - **Diagnose in Home Assistant:** Statusquelle, Fehlercode, letzte Gerätewerte
   und ein manueller Button zum Aktualisieren des Status.
 - **HACS-Updates mit Versionsnummern:** Veröffentlichte Releases werden als
