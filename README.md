@@ -1,4 +1,8 @@
-# Emerio Local
+<p align="center">
+  <img src="custom_components/emerio_local/brand/icon.png" alt="Emerio Local" width="180">
+</p>
+
+<h1 align="center">Emerio Local</h1>
 
 Experimentelle Home-Assistant-Integration für den Emerio PAC-127111.1 und
 Klarstein-kompatible Tuya-3.4-Klimageräte mit Product-ID `bvgvah9atllpyt5s`.
@@ -20,6 +24,33 @@ Nur bis eine echte Rückmeldung eintrifft, zeigt Home Assistant den gesendeten
 Wert als **optimistischen/angenommenen Zustand**. Das verhindert, dass die UI
 nach einem erfolgreichen Einschalten weiter „Aus“ anzeigt und deshalb keinen
 Ausschaltbefehl mehr anbietet.
+
+## Features
+
+- **Smart-Life-Onboarding mit QR-Code:** Device-ID und Local Key werden bei der
+  Neueinrichtung automatisch über die offizielle Tuya-Device-Sharing-API
+  abgerufen.
+- **Lokaler Betrieb nach der Einrichtung:** Steuerung und Statuskommunikation
+  laufen direkt zwischen Home Assistant und dem Klimagerät; die Tuya-Cloud wird
+  dafür nicht benötigt.
+- **Keine gespeicherten Cloud-Tokens:** Benutzercode, QR-, Access- und
+  Refresh-Token existieren nur während des Einrichtungsdialogs.
+- **Verlässliche Tuya-3.4-Verbindung:** Eine persistente Verbindung verarbeitet
+  Befehlsantworten und spontane Gerätemeldungen über denselben Socket.
+- **Vollständige Klimasteuerung:** Ein/Aus, Kühlen, Entfeuchten, Nur Lüften,
+  16–31 °C Zieltemperatur sowie hohe und niedrige Lüfterstufe.
+- **Zusatzfunktionen:** Schlafmodus, Timer von 0–24 Stunden und separater
+  Power-Schalter als Fallback.
+- **Firmwaregerechte Moduswechsel:** Nach dem Einschalten wartet die Integration
+  auf die Power-Bestätigung und die notwendige kurze Geräte-Settle-Zeit.
+- **Echte Zustandsrückmeldung:** Bestätigte Gerätewerte ersetzen automatisch den
+  nur vorübergehend optimistischen UI-Zustand.
+- **Robuster Reconnect:** Bei einem Verbindungsabbruch werden ausstehende
+  Datenpunkte vorgemerkt und nach dem Wiederaufbau übertragen.
+- **Diagnose in Home Assistant:** Statusquelle, Fehlercode, letzte Gerätewerte
+  und ein manueller Button zum Aktualisieren des Status.
+- **HACS-Updates mit Versionsnummern:** Veröffentlichte Releases werden als
+  semantische Versionen statt als Commit-Hashes angeboten.
 
 ## Installation über HACS
 
