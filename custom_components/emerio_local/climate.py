@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import (
     HVACAction,
@@ -24,6 +26,8 @@ from .mapping import (
     FAN_TO_TUYA,
     hvac_write_sequence,
 )
+
+_MODE_AFTER_POWER_DELAY = 2.5
 
 
 async def async_setup_entry(hass, entry: ConfigEntry, async_add_entities) -> None:
@@ -117,8 +121,9 @@ class EmerioClimate(EmerioEntity, ClimateEntity):
             await self.device.async_write_dps(dps)
             if index < len(writes) - 1:
                 # The mode command is ignored until the firmware has confirmed
-                # that its transition from off to on is complete.
+                # power and completed its short post-power transition.
                 await self.device.async_wait_for_device_dp(DP_POWER, True)
+                await asyncio.sleep(_MODE_AFTER_POWER_DELAY)
 
     async def async_set_temperature(self, **kwargs) -> None:
         temperature = kwargs.get(ATTR_TEMPERATURE)
