@@ -29,12 +29,30 @@ Ausschaltbefehl mehr anbietet.
 3. **Emerio Local** herunterladen und Home Assistant vollständig neu starten.
 4. Unter **Einstellungen → Geräte & Dienste → Integration hinzufügen** nach
    **Emerio Local** suchen.
-5. Name, feste IP-Adresse, Tuya Device ID und den 16-Byte Local Key eingeben.
-6. Andere lokale Tuya-Integrationen für dieses Gerät deaktiviert lassen.
+5. **Smart-Life-gestützte Einrichtung** wählen. Alternativ können vorhandene
+   Zugangsdaten weiterhin manuell eingegeben werden.
+6. In der Smart-Life- oder Tuya-Smart-App unten rechts **Profil**, oben rechts
+   **Einstellungen** und dann **Konto und Sicherheit → Benutzercode** öffnen.
+7. Den Benutzercode in Home Assistant eingeben. Danach in der App
+   **+ → Scannen** öffnen und den in Home Assistant angezeigten QR-Code scannen.
+8. Das Klimagerät auswählen, die App vollständig beenden und die lokale
+   Netzwerksuche starten. Abschließend die gefundene oder feste IP-Adresse
+   bestätigen.
+9. Andere lokale Tuya-Integrationen für dieses Gerät deaktiviert lassen.
 
 HACS installiert die Integration nach
 `/config/custom_components/emerio_local` und meldet neue veröffentlichte
 Versionen als Update.
+
+### Datenschutz beim Smart-Life-Onboarding
+
+Die Cloud-Verbindung wird nur während des Einrichtungsdialogs verwendet, um
+Gerätename, Device-ID und Local Key abzurufen. QR-Token, Access-Token,
+Refresh-Token und Smart-Life-Benutzercode werden nicht in der Home-Assistant-
+Konfiguration gespeichert. Der für die dauerhaft lokale Verbindung notwendige
+Local Key bleibt – wie bei der manuellen Einrichtung – im Config Entry von Home
+Assistant gespeichert. Nach der Einrichtung kommuniziert Emerio Local direkt
+mit dem Klimagerät; für den Betrieb ist keine Tuya-Cloud-Verbindung erforderlich.
 
 ## Manuelle Installation
 
@@ -80,3 +98,10 @@ logger:
 ```
 
 Der Local Key darf nie in Issues oder ungeschwärzten Logs veröffentlicht werden.
+
+## Danksagung
+
+Der Smart-Life-/QR-Onboarding-Ablauf basiert auf der MIT-lizenzierten Arbeit von
+[`make-all/tuya-local`](https://github.com/make-all/tuya-local) und dem
+offiziellen
+[`tuya-device-sharing-sdk`](https://github.com/tuya/tuya-device-sharing-sdk).

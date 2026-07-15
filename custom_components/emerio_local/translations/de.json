@@ -3,23 +3,73 @@
   "config": {
     "step": {
       "user": {
-        "title": "Emerio lokal einrichten",
-        "description": "Direkte lokale Steuerung für PAC-127111.1-kompatible Tuya-Klimageräte. Eine dauerhafte lokale Verbindung übernimmt echte Gerätemeldungen; nur ohne Antwort wird der letzte Befehl vorübergehend als Zustand verwendet.",
+        "title": "Emerio Local einrichten",
+        "description": "Mit der Smart-Life-gestützten Einrichtung werden Device-ID und Local Key automatisch abgerufen. Vorhandene lokale Zugangsdaten können weiterhin manuell eingegeben werden.",
+        "data": {
+          "setup_method": "Einrichtungsmethode"
+        }
+      },
+      "cloud": {
+        "title": "Smart Life verbinden",
+        "description": "Öffne die Smart-Life- oder Tuya-Smart-App. Tippe unten rechts auf **Profil**, öffne oben rechts **Einstellungen** und wähle **Konto und Sicherheit → Benutzercode**. Gib den dort angezeigten Code exakt mit Groß-/Kleinschreibung ein.",
+        "data": {
+          "user_code": "Benutzercode"
+        }
+      },
+      "scan": {
+        "title": "Emerio Local autorisieren",
+        "description": "Tippe in Smart Life oder Tuya Smart auf **+ → Scannen** und scanne diesen QR-Code. Bestätige die Autorisierung in der App und fahre danach hier fort.",
+        "data": {
+          "QR": "QR-Code"
+        }
+      },
+      "choose_device": {
+        "title": "Klimagerät auswählen",
+        "description": "Wähle das kompatible Emerio- oder Klarstein-Klimagerät aus, das eingerichtet werden soll.",
+        "data": {
+          "device_id": "Gerät"
+        }
+      },
+      "discover": {
+        "title": "Gerät im lokalen Netz finden",
+        "description": "Beende die Smart-Life- oder Tuya-Smart-App vollständig, damit sie die lokale Geräteverbindung nicht mehr belegt. Fahre danach fort, um das lokale Netz zu durchsuchen. Das kann ungefähr 20 Sekunden dauern."
+      },
+      "cloud_device": {
+        "title": "Lokale Verbindung bestätigen",
+        "description": "Device-ID und Local Key wurden abgerufen und werden nicht angezeigt. Cloud-Anmeldetokens werden nicht gespeichert. Bestätige die gefundene IP-Adresse oder trage die feste lokale Adresse des Geräts ein, falls es nicht gefunden wurde.",
+        "data": {
+          "name": "Name",
+          "host": "IP-Adresse"
+        }
+      },
+      "manual": {
+        "title": "Lokale Zugangsdaten eingeben",
+        "description": "Gib die feste lokale Adresse, die Tuya Device-ID und den 16-Byte Local Key des Geräts ein.",
         "data": {
           "name": "Name",
           "host": "IP-Adresse",
-          "device_id": "Tuya Device ID",
+          "device_id": "Tuya Device-ID",
           "local_key": "Tuya Local Key"
         }
       }
     },
     "error": {
       "cannot_connect": "Verbindung oder 3.4-Schlüsselaushandlung fehlgeschlagen.",
+      "cloud_login": "Tuya-Anmeldung fehlgeschlagen ({code}): {msg}",
       "invalid_key": "Der Local Key muss genau 16 Byte lang sein.",
       "unknown": "Unerwarteter Fehler. Details stehen im Home-Assistant-Protokoll."
     },
     "abort": {
-      "already_configured": "Dieses Tuya-Gerät ist bereits eingerichtet."
+      "already_configured": "Dieses Tuya-Gerät ist bereits eingerichtet.",
+      "no_supported_devices": "Das Smart-Life-Konto hat kein unterstütztes Emerio- oder Klarstein-Klimagerät mit lokalen Zugangsdaten geliefert. Die manuelle Einrichtung bleibt verfügbar."
+    }
+  },
+  "selector": {
+    "setup_method": {
+      "options": {
+        "cloud": "Smart-Life-gestützte Einrichtung",
+        "manual": "Device-ID und Local Key manuell eingeben"
+      }
     }
   }
 }

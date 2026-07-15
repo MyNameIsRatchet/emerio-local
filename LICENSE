@@ -1,6 +1,10 @@
 MIT License
 
-Copyright (c) 2026
+Copyright (c) 2026 Emerio Local contributors
+
+Portions of the Smart Life onboarding are adapted from make-all/tuya-local:
+Copyright 2018 Nik Rolls, 2026 Jason Rumney, 2022-2026 other contributors as
+listed in ACKNOWLEDGEMENTS.md in https://github.com/make-all/tuya-local
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

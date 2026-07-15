@@ -4,7 +4,47 @@
     "step": {
       "user": {
         "title": "Set up Emerio Local",
-        "description": "Direct local control for PAC-127111.1-compatible Tuya air conditioners. A persistent local connection imports real device updates; only without a reply is the last command used temporarily as state.",
+        "description": "Use the Smart Life assisted setup to retrieve the Device ID and Local Key automatically, or enter existing local credentials manually.",
+        "data": {
+          "setup_method": "Setup method"
+        }
+      },
+      "cloud": {
+        "title": "Connect Smart Life",
+        "description": "Open the Smart Life or Tuya Smart app. Tap **Me** at the bottom right, open **Settings** at the top right, then choose **Account and Security → User Code**. Enter the case-sensitive code shown there.",
+        "data": {
+          "user_code": "User code"
+        }
+      },
+      "scan": {
+        "title": "Authorize Emerio Local",
+        "description": "In Smart Life or Tuya Smart, tap **+ → Scan** and scan this QR code. Confirm the authorization in the app, then continue here.",
+        "data": {
+          "QR": "QR code"
+        }
+      },
+      "choose_device": {
+        "title": "Choose the air conditioner",
+        "description": "Select the compatible Emerio or Klarstein air conditioner to configure.",
+        "data": {
+          "device_id": "Device"
+        }
+      },
+      "discover": {
+        "title": "Find the device locally",
+        "description": "Fully close the Smart Life or Tuya Smart app so it no longer occupies the device's local connection. Then continue to search the local network. This can take about 20 seconds."
+      },
+      "cloud_device": {
+        "title": "Confirm local connection",
+        "description": "The Device ID and Local Key were retrieved and will not be displayed. Cloud login tokens are not saved. Confirm the detected IP address or enter the device's fixed local address if discovery did not find it.",
+        "data": {
+          "name": "Name",
+          "host": "IP address"
+        }
+      },
+      "manual": {
+        "title": "Enter local credentials",
+        "description": "Enter the device's fixed local address, Tuya Device ID and 16-byte Local Key.",
         "data": {
           "name": "Name",
           "host": "IP address",
@@ -15,11 +55,21 @@
     },
     "error": {
       "cannot_connect": "Connection or protocol 3.4 key negotiation failed.",
+      "cloud_login": "Tuya login failed ({code}): {msg}",
       "invalid_key": "The Local Key must be exactly 16 bytes.",
       "unknown": "Unexpected error. Check the Home Assistant log for details."
     },
     "abort": {
-      "already_configured": "This Tuya device is already configured."
+      "already_configured": "This Tuya device is already configured.",
+      "no_supported_devices": "The Smart Life account did not return a supported Emerio or Klarstein air conditioner with local credentials. Manual setup remains available."
+    }
+  },
+  "selector": {
+    "setup_method": {
+      "options": {
+        "cloud": "Smart Life assisted setup",
+        "manual": "Enter Device ID and Local Key manually"
+      }
     }
   }
 }
