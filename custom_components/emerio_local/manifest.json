@@ -9,5 +9,5 @@
   "issue_tracker": "https://github.com/MyNameIsRatchet/emerio-local/issues",
   "loggers": ["tinytuya"],
   "requirements": ["tinytuya==1.20.0"],
-  "version": "0.2.3"
+  "version": "0.2.4"
 }
