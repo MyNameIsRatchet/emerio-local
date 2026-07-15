@@ -1,0 +1,25 @@
+{
+  "title": "Emerio Local",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Emerio lokal einrichten",
+        "description": "Direkte lokale Steuerung für PAC-127111.1-kompatible Tuya-Klimageräte. Eine dauerhafte lokale Verbindung übernimmt echte Gerätemeldungen; nur ohne Antwort wird der letzte Befehl vorübergehend als Zustand verwendet.",
+        "data": {
+          "name": "Name",
+          "host": "IP-Adresse",
+          "device_id": "Tuya Device ID",
+          "local_key": "Tuya Local Key"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung oder 3.4-Schlüsselaushandlung fehlgeschlagen.",
+      "invalid_key": "Der Local Key muss genau 16 Byte lang sein.",
+      "unknown": "Unerwarteter Fehler. Details stehen im Home-Assistant-Protokoll."
+    },
+    "abort": {
+      "already_configured": "Dieses Tuya-Gerät ist bereits eingerichtet."
+    }
+  }
+}

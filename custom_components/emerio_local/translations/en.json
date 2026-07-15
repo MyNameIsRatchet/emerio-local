@@ -1,0 +1,25 @@
+{
+  "title": "Emerio Local",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Set up Emerio Local",
+        "description": "Direct local control for PAC-127111.1-compatible Tuya air conditioners. A persistent local connection imports real device updates; only without a reply is the last command used temporarily as state.",
+        "data": {
+          "name": "Name",
+          "host": "IP address",
+          "device_id": "Tuya Device ID",
+          "local_key": "Tuya Local Key"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Connection or protocol 3.4 key negotiation failed.",
+      "invalid_key": "The Local Key must be exactly 16 bytes.",
+      "unknown": "Unexpected error. Check the Home Assistant log for details."
+    },
+    "abort": {
+      "already_configured": "This Tuya device is already configured."
+    }
+  }
+}
