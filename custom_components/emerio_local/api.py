@@ -128,7 +128,7 @@ class EmerioDevice:
         # The first query lets TinyTuya detect device22. The second query uses
         # that detected format; UPDATEDPS is an additional firmware-specific path.
         self._schedule_status_sequence()
-        self._poll_task = self.hass.async_create_task(
+        self._poll_task = self.hass.async_create_background_task(
             self._async_poll_loop(), f"emerio_local_poll_{self.device_id}"
         )
 
@@ -222,6 +222,39 @@ class EmerioDevice:
             raise EmerioCommunicationError(self.last_error) from err
         finally:
             self._status_waiters.discard(waiter)
+
+    async def async_wait_for_device_dp(
+        self, dp: int, expected: Any, timeout: float = 2.0
+    ) -> bool:
+        """Wait until the device, not the optimistic state, confirms a DP value."""
+
+        def is_confirmed() -> bool:
+            return (
+                self.last_device_dps is not None
+                and self.last_device_dps.get(str(dp)) == expected
+                and dp in self.state.confirmed_dps
+            )
+
+        if is_confirmed():
+            return True
+
+        confirmed = asyncio.Event()
+
+        @callback
+        def handle_update() -> None:
+            if is_confirmed():
+                confirmed.set()
+
+        remove_listener = self.add_listener(handle_update)
+        try:
+            if is_confirmed():
+                return True
+            await asyncio.wait_for(confirmed.wait(), timeout=timeout)
+        except TimeoutError:
+            return False
+        finally:
+            remove_listener()
+        return True
 
     def _start_monitor_sync(self) -> None:
         if self._monitor is None or self._monitor_device is None:

@@ -112,8 +112,13 @@ class EmerioClimate(EmerioEntity, ClimateEntity):
             return
         # This Emerio firmware accepts the individual DPs but ignores the mode
         # when power and mode are combined in one Tuya command.
-        for dps in hvac_write_sequence(self.device.state.power, hvac_mode.value):
+        writes = hvac_write_sequence(self.device.state.power, hvac_mode.value)
+        for index, dps in enumerate(writes):
             await self.device.async_write_dps(dps)
+            if index < len(writes) - 1:
+                # The mode command is ignored until the firmware has confirmed
+                # that its transition from off to on is complete.
+                await self.device.async_wait_for_device_dp(DP_POWER, True)
 
     async def async_set_temperature(self, **kwargs) -> None:
         temperature = kwargs.get(ATTR_TEMPERATURE)
