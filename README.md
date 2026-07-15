@@ -49,6 +49,9 @@ Ausschaltbefehl mehr anbietet.
   Datenpunkte vorgemerkt und nach dem Wiederaufbau übertragen.
 - **Erholung nach Netztrennung:** Ein nach Shelly- oder Stromtrennung veralteter
   Monitor wird durch eine echte Statusabfrage erkannt und sauber neu aufgebaut.
+- **Schutz vor veralteten Rückmeldungen:** Direkt nach einem Befehl ausgesendete
+  alte Gerätewerte dürfen den tatsächlich ausgeführten Modus oder Sollwert nicht
+  mehr in Home Assistant zurückrollen.
 - **Diagnose in Home Assistant:** Statusquelle, Fehlercode, letzte Gerätewerte
   und ein manueller Button zum Aktualisieren des Status.
 - **HACS-Updates mit Versionsnummern:** Veröffentlichte Releases werden als

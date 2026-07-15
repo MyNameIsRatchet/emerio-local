@@ -17,8 +17,10 @@ from .mapping import EmerioState, KNOWN_DPS, apply_dps
 
 _LOGGER = logging.getLogger(__name__)
 
-_STATUS_TIMEOUT = 3.0
+_STATUS_TIMEOUT = 12.0
 _POLL_INTERVAL = 30.0
+_POST_COMMAND_STATUS_DELAY = 5.0
+_STATUS_REQUEST_SPACING = 1.5
 
 
 class EmerioCommunicationError(HomeAssistantError):
@@ -63,6 +65,7 @@ class EmerioDevice:
         self._listeners: set[Callable[[], None]] = set()
         self._status_waiters: set[asyncio.Future[None]] = set()
         self._pending_dps: dict[int, Any] = {}
+        self._pending_confirmations: dict[int, Any] = {}
         self._monitor: Any | None = None
         self._monitor_device: Any | None = None
         self._monitor_registered = False
@@ -198,12 +201,16 @@ class EmerioDevice:
 
             self.last_command = payload
             self.last_command_at = datetime.now(timezone.utc)
+            self._pending_confirmations.update(dps)
             apply_dps(self.state, dps, "optimistic")
             self._notify()
 
         if self.monitor_connected:
-            # Capture the control response first, then actively ask for a report.
-            self._schedule_status_sequence(initial_delay=0.2)
+            # This firmware emits its previous state briefly after accepting a
+            # command. Give it time to settle before requesting fresh reports.
+            self._schedule_status_sequence(
+                initial_delay=_POST_COMMAND_STATUS_DELAY
+            )
 
     async def async_refresh(self) -> None:
         """Request real DPs and wait briefly for the passive monitor callback."""
@@ -355,11 +362,42 @@ class EmerioDevice:
 
     @callback
     def _apply_device_dps(self, dps: dict[int | str, Any]) -> None:
-        if not apply_dps(self.state, dps, "device"):
+        accepted_dps: dict[int | str, Any] = {}
+        for raw_dp, value in dps.items():
+            try:
+                dp = int(raw_dp)
+            except (TypeError, ValueError):
+                accepted_dps[raw_dp] = value
+                continue
+
+            if dp not in self._pending_confirmations:
+                accepted_dps[raw_dp] = value
+                continue
+
+            expected = self._pending_confirmations[dp]
+            if value == expected:
+                self._pending_confirmations.pop(dp, None)
+                accepted_dps[raw_dp] = value
+                continue
+
+            # The PAC-127111.1 executes commands but can keep returning its
+            # pre-command value indefinitely. Retain the honest optimistic
+            # state until the same DP is confirmed instead of rolling the UI
+            # back to a value that is demonstrably no longer active.
+            _LOGGER.debug(
+                "Ignoring stale DP %s=%r while waiting for commanded %r",
+                dp,
+                value,
+                expected,
+            )
+
+        if not apply_dps(self.state, accepted_dps, "device"):
             return
         if self.last_device_dps is None:
             self.last_device_dps = {}
-        self.last_device_dps.update({str(dp): value for dp, value in dps.items()})
+        self.last_device_dps.update(
+            {str(dp): value for dp, value in accepted_dps.items()}
+        )
         self.last_status_at = datetime.now(timezone.utc)
         self.command_reachable = True
         self.last_error = None
@@ -395,11 +433,11 @@ class EmerioDevice:
             if not self.monitor_connected:
                 return
             self._queue_monitor_command("status")
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(_STATUS_REQUEST_SPACING)
             if not self.monitor_connected:
                 return
             self._queue_monitor_command("status")
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(_STATUS_REQUEST_SPACING)
             if self.monitor_connected:
                 self._queue_monitor_command("updatedps", list(KNOWN_DPS))
         except asyncio.CancelledError:
