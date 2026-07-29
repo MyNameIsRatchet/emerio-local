@@ -17,8 +17,10 @@ einem ausgeführten Befehl den Zustand.
 Emerio Local hält stattdessen eine Tuya-3.4-Verbindung offen. Befehle,
 Control-Antworten, spontane Push-Meldungen und Statusanfragen laufen dadurch über
 denselben Socket. Erkannte Datenpunkte werden als echter Gerätestatus nach Home
-Assistant übernommen. Nach einem Befehl fragt die Integration zusätzlich im
-normalen und im von TinyTuya erkannten `device22`-Format nach.
+Assistant übernommen. Geräte mit 22-stelliger Tuya-ID werden direkt im dafür
+vorgesehenen `device22`-Format abgefragt. Falls eine Statusabfrage damit oder im
+normalen Format fehlschlägt, probiert die Integration automatisch das jeweils
+andere Format und behält das funktionierende für die dauerhafte Verbindung bei.
 
 Nur bis eine echte Rückmeldung eintrifft, zeigt Home Assistant den gesendeten
 Wert als **optimistischen/angenommenen Zustand**. Das verhindert, dass die UI
@@ -45,6 +47,9 @@ Ausschaltbefehl mehr anbietet.
   auf die Power-Bestätigung und die notwendige kurze Geräte-Settle-Zeit.
 - **Echte Zustandsrückmeldung:** Bestätigte Gerätewerte ersetzen automatisch den
   nur vorübergehend optimistischen UI-Zustand.
+- **Robuste Statusabfrage:** 22-stellige Tuya-Geräte-IDs verwenden direkt das
+  `device22`-Format; bei Zeitüberschreitungen wird das alternative Format
+  automatisch getestet.
 - **Robuster Reconnect:** Bei einem Verbindungsabbruch werden ausstehende
   Datenpunkte vorgemerkt und nach dem Wiederaufbau übertragen.
 - **Erholung nach Netztrennung:** Ein nach Shelly- oder Stromtrennung veralteter
@@ -117,10 +122,10 @@ Klimagerät. `optimistic` bedeutet: Home Assistant zeigt vorübergehend den zule
 gesendeten Wert, weil noch keine auswertbare Rückmeldung eingetroffen ist.
 
 Die Integration lauscht auf spontane Meldungen und fragt alle 30 Sekunden sowie
-nach jedem Befehl nach. Ob die spezielle Emerio-Firmware ihre Datenpunkte auf
-dieser dauerhaften Verbindung vollständig liefert, muss einmal am echten Gerät
-getestet werden. Die Bedienung bleibt auch dann möglich, wenn nur der
-optimistische Fallback funktioniert.
+nach jedem Befehl nach. Schlägt das bevorzugte Tuya-Abfrageformat fehl, wird bei
+der nächsten direkten Statusprüfung automatisch das alternative Format getestet.
+Die Bedienung bleibt auch dann möglich, wenn vorübergehend nur der optimistische
+Fallback verfügbar ist.
 
 ## Logging
 
