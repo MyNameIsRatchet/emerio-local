@@ -17,12 +17,12 @@ einem ausgeführten Befehl den Zustand.
 Emerio Local handelt den ersten Status wie `tuya-local` über frische,
 nichtpersistente Verbindungen aus. Reagiert das Gerät nicht auf die bekannte
 3.4-Abfrage, probiert die Integration die von `tuya-local` unterstützten
-Protokollvarianten einzeln und mit Pause. Erst nachdem das Gerät echte
-Datenpunkte geliefert hat, hält die Integration genau eine persistente
-Verbindung mit der erfolgreichen Variante offen. Befehle, Control-Antworten,
-spontane Push-Meldungen und spätere Statusanfragen laufen dann über denselben
-Socket. Ein Heartbeat hält ihn aktiv; höchstens eine Statusabfrage pro
-30-Sekunden-Zyklus verhindert belastende Abfrage-Bursts.
+Protokollvarianten einzeln und mit Pause. Liefert keine davon Daten, öffnet die
+Integration anschließend einen rein passiven, persistenten 3.4-Socket. So
+können Control-Antworten und spontane Push-Meldungen ankommen, ohne das Gerät
+weiter mit Statusabfragen zu belasten. Hat eine Variante echte Datenpunkte
+geliefert, läuft auch die spätere schonende Statusabfrage über den persistenten
+Socket. Ein Heartbeat hält die jeweilige Verbindung aktiv.
 
 Nur bis eine echte Rückmeldung eintrifft, zeigt Home Assistant den gesendeten
 Wert als **optimistischen/angenommenen Zustand**. Das verhindert, dass die UI
@@ -41,7 +41,8 @@ Ausschaltbefehl mehr anbietet.
   Refresh-Token existieren nur während des Einrichtungsdialogs.
 - **Verlässliche Tuya-3.4-Verbindung:** Frische Verbindungen handeln den ersten
   Gerätestatus aus; danach verarbeitet ein persistenter Socket Befehlsantworten
-  und spontane Gerätemeldungen.
+  und spontane Gerätemeldungen. Bleibt der Status stumm, lauscht der Socket
+  passiv und sendet außer Heartbeats keine Leseabfragen.
 - **Schonende Statusabfrage:** Keine zusätzlichen Sockets und keine
   Status-Bursts nach Befehlen; Heartbeats halten die einzige Verbindung offen.
 - **Vollständige Klimasteuerung:** Ein/Aus, Kühlen, Entfeuchten, Nur Lüften,
@@ -126,10 +127,11 @@ gesendeten Wert, weil noch keine auswertbare Rückmeldung eingetroffen ist.
 Bis zur ersten echten Statusantwort probiert die Integration mit mindestens fünf
 Sekunden Abstand jeweils eine Protokollvariante über eine frische Verbindung und
 wartet dabei wie `tuya-local` bis zu fünf Sekunden auf die Antwort. Bleibt ein
-vollständiger Zyklus erfolglos, pausiert die Erkennung fünf Minuten. Der bekannte
-3.4-Befehlspfad bleibt während dieser rein lesenden Erkennung unverändert.
-Danach lauscht die Integration auf spontane Meldungen und fragt über denselben
-persistenten Socket höchstens einmal alle 30 Sekunden nach.
+vollständiger Zyklus erfolglos, öffnet sie einen persistenten 3.4-Monitor, der
+nur auf spontane Meldungen und Befehlsantworten lauscht. Der bekannte
+3.4-Befehlspfad bleibt während der rein lesenden Erkennung unverändert.
+Statusabfragen im 30-Sekunden-Takt werden ausschließlich dann aktiviert, wenn
+der anfängliche Status-Handshake tatsächlich Daten geliefert hat.
 
 ## Logging
 

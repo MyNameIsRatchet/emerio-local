@@ -79,6 +79,7 @@ class EmerioDevice:
         self._monitor: Any | None = None
         self._monitor_device: Any | None = None
         self._monitor_registered = False
+        self._status_requests_enabled = False
         self._bootstrap_protocol_index = 0
         self.bootstrap_cycle_exhausted = False
         self._active_protocol = PROTOCOL_VERSION
@@ -111,9 +112,12 @@ class EmerioDevice:
             self._async_poll_loop(), f"emerio_local_poll_{self.device_id}"
         )
 
-    async def _async_start_monitor_transport(self) -> bool:
+    async def _async_start_monitor_transport(
+        self, *, status_requests: bool = True
+    ) -> bool:
         """Create the persistent monitor without changing the poll task."""
 
+        self._status_requests_enabled = status_requests
         self._monitor_device = self._new_tuya_device(
             timeout=_STATUS_CONNECTION_TIMEOUT,
             persist=True,
@@ -133,6 +137,7 @@ class EmerioDevice:
             await self.hass.async_add_executor_job(self._start_monitor_sync)
         except Exception as err:
             self._monitor_registered = False
+            self._status_requests_enabled = False
             self.monitor_connected = False
             self.command_reachable = False
             self.last_error = f"Dauerverbindung: {err}"
@@ -151,11 +156,15 @@ class EmerioDevice:
         self.monitor_connected = True
         self.command_reachable = True
         self.last_connect_at = datetime.now(timezone.utc)
-        self.last_error = None
+        self.last_error = (
+            None
+            if status_requests
+            else "Keine Statusantwort; passiver 3.4-Monitor aktiv"
+        )
         self._notify()
 
-        # A later poll will retry with device22 automatically if TinyTuya
-        # detects that format. Do not send a burst of queries on connect.
+        # A passive fallback listens only for device pushes and command
+        # responses. Active polling starts only after a real status handshake.
         self._schedule_status_request()
         return True
 
@@ -181,6 +190,7 @@ class EmerioDevice:
         self._monitor = None
         self._monitor_device = None
         self._monitor_registered = False
+        self._status_requests_enabled = False
         self.monitor_connected = False
         self.command_reachable = False
 
@@ -271,6 +281,7 @@ class EmerioDevice:
             self._monitor = None
             self._monitor_device = None
             self._monitor_registered = False
+            self._status_requests_enabled = False
             self.monitor_connected = False
             self.command_reachable = False
 
@@ -311,6 +322,8 @@ class EmerioDevice:
             )
             self._advance_bootstrap_protocol()
             self._notify()
+            if self.bootstrap_cycle_exhausted:
+                await self._async_start_monitor_transport(status_requests=False)
             return False
 
         self._active_protocol = protocol_version
@@ -325,6 +338,12 @@ class EmerioDevice:
         """Return the protocol variant used by the next bootstrap attempt."""
 
         return self._current_bootstrap_protocol[0]
+
+    @property
+    def status_requests_enabled(self) -> bool:
+        """Return whether the persistent transport may actively query status."""
+
+        return self._status_requests_enabled
 
     @property
     def _current_bootstrap_protocol(self) -> tuple[str, float, bool]:
@@ -487,7 +506,11 @@ class EmerioDevice:
 
     @callback
     def _schedule_status_request(self, *, force: bool = False) -> None:
-        if not self.monitor_connected or self._stopping:
+        if (
+            not self._status_requests_enabled
+            or not self.monitor_connected
+            or self._stopping
+        ):
             return
         if self._status_task is not None and not self._status_task.done():
             if not force:

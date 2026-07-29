@@ -46,6 +46,7 @@ class EmerioEntity(Entity):
             "state_source": self.device.state.source,
             "command_reachable": self.device.command_reachable,
             "monitor_connected": self.device.monitor_connected,
+            "status_requests_enabled": self.device.status_requests_enabled,
             "last_command": self.device.last_command,
             "last_command_at": self.device.last_command_at,
             "last_status_at": self.device.last_status_at,
