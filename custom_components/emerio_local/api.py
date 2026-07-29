@@ -19,6 +19,7 @@ _LOGGER = logging.getLogger(__name__)
 
 _STATUS_TIMEOUT = 12.0
 _POLL_INTERVAL = 30.0
+_BOOTSTRAP_RETRY_INTERVAL = 5.0
 
 
 class EmerioCommunicationError(HomeAssistantError):
@@ -87,10 +88,10 @@ class EmerioDevice:
             listener()
 
     async def async_start(self) -> None:
-        """Open a persistent Tuya 3.4 session and start listening for pushes."""
+        """Negotiate status first, then keep one Tuya 3.4 session open."""
 
         self._stopping = False
-        await self._async_start_monitor_transport()
+        await self._async_bootstrap_then_monitor()
         self._poll_task = self.hass.async_create_background_task(
             self._async_poll_loop(), f"emerio_local_poll_{self.device_id}"
         )
@@ -98,7 +99,7 @@ class EmerioDevice:
     async def _async_start_monitor_transport(self) -> bool:
         """Create the persistent monitor without changing the poll task."""
 
-        self._monitor_device = self._new_tuya_device(timeout=3.0)
+        self._monitor_device = self._new_tuya_device(timeout=3.0, persist=True)
         self._monitor_device.set_dpsUsed({str(dp): None for dp in KNOWN_DPS})
         self._monitor = tinytuya.Monitor(
             on_status=self._monitor_status_callback,
@@ -185,14 +186,13 @@ class EmerioDevice:
                         self.command_reachable = False
                         self.last_error = "Verbindung wird aufgebaut; Befehl vorgemerkt"
                 else:
+                    # During protocol bootstrap, mirror tuya-local and use a
+                    # fresh non-persistent connection. Do not make the socket
+                    # persistent until the device has returned real state.
                     async with self._monitor_lock:
-                        if not self._monitor_registered:
-                            await self._async_start_monitor_transport()
-                    if not self._monitor_registered or not self.monitor_connected:
-                        raise EmerioCommunicationError(
-                            "Dauerverbindung ist nicht verfügbar"
+                        await self.hass.async_add_executor_job(
+                            self._write_dps_sync, dps
                         )
-                    self._queue_monitor_command("set_multiple_values", payload)
                     self.command_reachable = True
                     self.last_error = None
             except Exception as err:
@@ -213,23 +213,27 @@ class EmerioDevice:
         """Request real DPs and wait briefly for the passive monitor callback."""
 
         if not self._monitor_registered or not self.monitor_connected:
-            await self._async_recover_monitor_status()
+            if self._monitor_registered:
+                await self._async_recover_monitor_status()
+            elif not await self._async_bootstrap_then_monitor():
+                raise EmerioCommunicationError(
+                    self.last_error or "Statusabfrage: Gerät lieferte keine Datenpunkte"
+                )
+            return
 
         waiter = self.hass.loop.create_future()
         self._status_waiters.add(waiter)
         self._schedule_status_request(force=True)
         try:
             await asyncio.wait_for(waiter, timeout=_STATUS_TIMEOUT)
-        except TimeoutError as err:
+        except TimeoutError:
             await self._async_recover_monitor_status()
-            self.last_error = "Statusabfrage: Gerät lieferte keine Datenpunkte"
-            self._notify()
-            raise EmerioCommunicationError(self.last_error) from err
+            return
         finally:
             self._status_waiters.discard(waiter)
 
     async def _async_recover_monitor_status(self) -> None:
-        """Replace a stale monitor with one new persistent connection."""
+        """Re-negotiate status before replacing a stale persistent connection."""
 
         async with self._monitor_lock:
             status_task = self._status_task
@@ -246,10 +250,38 @@ class EmerioDevice:
             self.monitor_connected = False
             self.command_reachable = False
 
-            if not await self._async_start_monitor_transport():
+            if not await self._async_bootstrap_then_monitor_locked():
                 raise EmerioCommunicationError(
-                    self.last_error or "Dauerverbindung ist nicht verfügbar"
+                    self.last_error or "Statusabfrage: Gerät lieferte keine Datenpunkte"
                 )
+
+    async def _async_bootstrap_then_monitor(self) -> bool:
+        """Fetch initial state on fresh sockets before enabling persistence."""
+
+        async with self._monitor_lock:
+            if self._monitor_registered:
+                return True
+            return await self._async_bootstrap_then_monitor_locked()
+
+    async def _async_bootstrap_then_monitor_locked(self) -> bool:
+        """Bootstrap status while the monitor lock is held."""
+
+        try:
+            dps = await self.hass.async_add_executor_job(self._refresh_sync)
+        except Exception as err:
+            self.monitor_connected = False
+            self.command_reachable = False
+            self.last_error = f"Status-Bootstrap: {err}"
+            _LOGGER.debug(
+                "Initial non-persistent status query to %s failed: %s",
+                self.host,
+                err,
+            )
+            self._notify()
+            return False
+
+        self._apply_device_dps(dps)
+        return await self._async_start_monitor_transport()
 
     async def async_wait_for_device_dp(
         self, dp: int, expected: Any, timeout: float = 2.0
@@ -426,25 +458,60 @@ class EmerioDevice:
     async def _async_poll_loop(self) -> None:
         try:
             while True:
-                await asyncio.sleep(_POLL_INTERVAL)
+                interval = (
+                    _POLL_INTERVAL
+                    if self._monitor_registered
+                    else _BOOTSTRAP_RETRY_INTERVAL
+                )
+                await asyncio.sleep(interval)
                 await self._async_poll_once()
         except asyncio.CancelledError:
             raise
 
     async def _async_poll_once(self) -> None:
-        """Poll once and restore the monitor even for status-blind firmware."""
+        """Poll persistently, or retry bootstrap on a fresh connection."""
 
-        if self._monitor_registered:
+        if self._monitor_registered and self.monitor_connected:
             self._schedule_status_request()
             return
 
-        async with self._monitor_lock:
-            if self._monitor_registered:
+        if self._monitor_registered:
+            try:
+                await self._async_recover_monitor_status()
+            except EmerioCommunicationError:
                 return
-            await self._async_start_monitor_transport()
+            return
 
-    def _new_tuya_device(self, timeout: float):
-        """Create the sole runtime transport as a persistent Tuya socket."""
+        await self._async_bootstrap_then_monitor()
+
+    def _write_dps_sync(self, dps: dict[int, Any]) -> None:
+        """Send a command on a fresh socket while status is still bootstrapping."""
+
+        device = self._new_tuya_device(timeout=3.0, persist=False)
+        try:
+            payload = {str(dp): value for dp, value in dps.items()}
+            result = device.set_multiple_values(payload, nowait=True)
+            _raise_for_tuya_error(result)
+        finally:
+            device.close()
+
+    def _refresh_sync(self) -> dict[str, Any]:
+        """Fetch initial DPS on a fresh connection, allowing device22 detection."""
+
+        device = self._new_tuya_device(timeout=3.0, persist=False)
+        try:
+            device.set_dpsUsed({str(dp): None for dp in KNOWN_DPS})
+            result = device.status()
+            _raise_for_tuya_error(result)
+            dps = _extract_dps(result)
+            if not dps:
+                raise EmerioCommunicationError("Gerät lieferte keine Datenpunkte")
+            return dps
+        finally:
+            device.close()
+
+    def _new_tuya_device(self, timeout: float, persist: bool):
+        """Create a Tuya transport for bootstrap or persistent monitoring."""
 
         device = tinytuya.OutletDevice(
             self.device_id,
@@ -453,13 +520,11 @@ class EmerioDevice:
             dev_type="default",
             connection_timeout=timeout,
             version=PROTOCOL_VERSION,
-            persist=True,
+            persist=persist,
             connection_retry_limit=1,
             connection_retry_delay=0,
         )
-        # Keep TinyTuya's recommended persistent-socket policy explicit and
-        # testable even though the constructor's persist=True sets it already.
-        device.set_socketPersistent(True)
+        device.set_socketPersistent(persist)
         device.set_socketTimeout(timeout)
         device.set_socketRetryLimit(1)
         device.set_socketRetryDelay(0)

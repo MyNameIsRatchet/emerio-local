@@ -14,13 +14,14 @@ synchrone Tuya-Statusabfrage aber nicht zuverlässig. Andere Integrationen warte
 auf genau diese Antwort, markieren das Gerät als offline oder verlieren nach
 einem ausgeführten Befehl den Zustand.
 
-Emerio Local hält stattdessen genau eine persistente Tuya-3.4-Verbindung offen.
-Befehle, Control-Antworten, spontane Push-Meldungen und Statusanfragen laufen
-dadurch über denselben Socket. Ein Heartbeat hält ihn aktiv; höchstens eine
-Statusabfrage pro 30-Sekunden-Zyklus verhindert belastende Abfrage-Bursts.
-TinyTuya verwendet bei späteren Abfragen automatisch das erkannte `device22`-
-Format. Erkannte Datenpunkte werden als echter Gerätestatus nach Home Assistant
-übernommen.
+Emerio Local handelt den ersten Status wie `tuya-local` über eine frische,
+nichtpersistente Tuya-3.4-Verbindung aus. Erst nachdem das Gerät echte
+Datenpunkte geliefert hat, hält die Integration genau eine persistente
+Verbindung offen. Befehle, Control-Antworten, spontane Push-Meldungen und spätere
+Statusanfragen laufen dann über denselben Socket. Ein Heartbeat hält ihn aktiv;
+höchstens eine Statusabfrage pro 30-Sekunden-Zyklus verhindert belastende
+Abfrage-Bursts. TinyTuya verwendet bei Bedarf automatisch das erkannte
+`device22`-Format.
 
 Nur bis eine echte Rückmeldung eintrifft, zeigt Home Assistant den gesendeten
 Wert als **optimistischen/angenommenen Zustand**. Das verhindert, dass die UI
@@ -37,8 +38,9 @@ Ausschaltbefehl mehr anbietet.
   dafür nicht benötigt.
 - **Keine gespeicherten Cloud-Tokens:** Benutzercode, QR-, Access- und
   Refresh-Token existieren nur während des Einrichtungsdialogs.
-- **Verlässliche Tuya-3.4-Verbindung:** Eine persistente Verbindung verarbeitet
-  Befehlsantworten und spontane Gerätemeldungen über denselben Socket.
+- **Verlässliche Tuya-3.4-Verbindung:** Frische Verbindungen handeln den ersten
+  Gerätestatus aus; danach verarbeitet ein persistenter Socket Befehlsantworten
+  und spontane Gerätemeldungen.
 - **Schonende Statusabfrage:** Keine zusätzlichen Sockets und keine
   Status-Bursts nach Befehlen; Heartbeats halten die einzige Verbindung offen.
 - **Vollständige Klimasteuerung:** Ein/Aus, Kühlen, Entfeuchten, Nur Lüften,
@@ -120,12 +122,12 @@ mit dem Klimagerät; für den Betrieb ist keine Tuya-Cloud-Verbindung erforderli
 Klimagerät. `optimistic` bedeutet: Home Assistant zeigt vorübergehend den zuletzt
 gesendeten Wert, weil noch keine auswertbare Rückmeldung eingetroffen ist.
 
-Die Integration lauscht auf spontane Meldungen und fragt über denselben
-persistenten Socket höchstens einmal alle 30 Sekunden nach. Nach Befehlen wartet
-sie passiv auf die von Tuya vorgesehene Zustandsmeldung. Ob die spezielle
-Emerio-Firmware ihre Datenpunkte auf dieser dauerhaften Verbindung vollständig
-liefert, muss einmal am echten Gerät getestet werden. Die Bedienung bleibt auch
-dann möglich, wenn nur der optimistische Fallback funktioniert.
+Bis zur ersten echten Statusantwort fragt die Integration alle fünf Sekunden
+über jeweils eine frische Verbindung an. Danach lauscht sie auf spontane
+Meldungen und fragt über denselben persistenten Socket höchstens einmal alle
+30 Sekunden nach. Nach Befehlen wartet sie passiv auf die von Tuya vorgesehene
+Zustandsmeldung. Die Bedienung bleibt während des Status-Handshakes über frische
+Verbindungen möglich.
 
 ## Logging
 
