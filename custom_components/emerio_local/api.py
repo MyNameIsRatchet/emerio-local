@@ -3,24 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from datetime import datetime, timezone
-import logging
 from typing import Any
 
+import tinytuya
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-import tinytuya
 
 from .const import PROTOCOL_VERSION
-from .mapping import EmerioState, KNOWN_DPS, apply_dps
+from .mapping import KNOWN_DPS, EmerioState, apply_dps
 
 _LOGGER = logging.getLogger(__name__)
 
 _STATUS_TIMEOUT = 12.0
 _POLL_INTERVAL = 30.0
-_POST_COMMAND_STATUS_DELAY = 5.0
-_STATUS_REQUEST_SPACING = 1.5
 
 
 class EmerioCommunicationError(HomeAssistantError):
@@ -100,7 +98,7 @@ class EmerioDevice:
     async def _async_start_monitor_transport(self) -> bool:
         """Create the persistent monitor without changing the poll task."""
 
-        self._monitor_device = self._new_tuya_device(timeout=3.0, persist=True)
+        self._monitor_device = self._new_tuya_device(timeout=3.0)
         self._monitor_device.set_dpsUsed({str(dp): None for dp in KNOWN_DPS})
         self._monitor = tinytuya.Monitor(
             on_status=self._monitor_status_callback,
@@ -114,7 +112,6 @@ class EmerioDevice:
         try:
             await self.hass.async_add_executor_job(self._start_monitor_sync)
         except Exception as err:
-            # A one-shot write fallback remains usable even if Monitor cannot start.
             self._monitor_registered = False
             self.monitor_connected = False
             self.command_reachable = False
@@ -137,9 +134,9 @@ class EmerioDevice:
         self.last_error = None
         self._notify()
 
-        # The first query lets TinyTuya detect device22. The second query uses
-        # that detected format; UPDATEDPS is an additional firmware-specific path.
-        self._schedule_status_sequence()
+        # A later poll will retry with device22 automatically if TinyTuya
+        # detects that format. Do not send a burst of queries on connect.
+        self._schedule_status_request()
         return True
 
     async def async_stop(self) -> None:
@@ -188,7 +185,14 @@ class EmerioDevice:
                         self.command_reachable = False
                         self.last_error = "Verbindung wird aufgebaut; Befehl vorgemerkt"
                 else:
-                    await self.hass.async_add_executor_job(self._write_dps_sync, dps)
+                    async with self._monitor_lock:
+                        if not self._monitor_registered:
+                            await self._async_start_monitor_transport()
+                    if not self._monitor_registered or not self.monitor_connected:
+                        raise EmerioCommunicationError(
+                            "Dauerverbindung ist nicht verfügbar"
+                        )
+                    self._queue_monitor_command("set_multiple_values", payload)
                     self.command_reachable = True
                     self.last_error = None
             except Exception as err:
@@ -205,38 +209,27 @@ class EmerioDevice:
             apply_dps(self.state, dps, "optimistic")
             self._notify()
 
-        if self.monitor_connected:
-            # This firmware emits its previous state briefly after accepting a
-            # command. Give it time to settle before requesting fresh reports.
-            self._schedule_status_sequence(
-                initial_delay=_POST_COMMAND_STATUS_DELAY
-            )
-
     async def async_refresh(self) -> None:
         """Request real DPs and wait briefly for the passive monitor callback."""
 
         if not self._monitor_registered or not self.monitor_connected:
-            try:
-                dps = await self.hass.async_add_executor_job(self._refresh_sync)
-            except Exception as err:
-                self.last_error = f"Statusabfrage: {err}"
-                self._notify()
-                raise EmerioCommunicationError(self.last_error) from err
-            self._apply_device_dps(dps)
-            return
+            await self._async_recover_monitor_status()
 
         waiter = self.hass.loop.create_future()
         self._status_waiters.add(waiter)
-        self._schedule_status_sequence(force=True)
+        self._schedule_status_request(force=True)
         try:
             await asyncio.wait_for(waiter, timeout=_STATUS_TIMEOUT)
-        except TimeoutError:
+        except TimeoutError as err:
             await self._async_recover_monitor_status()
+            self.last_error = "Statusabfrage: Gerät lieferte keine Datenpunkte"
+            self._notify()
+            raise EmerioCommunicationError(self.last_error) from err
         finally:
             self._status_waiters.discard(waiter)
 
     async def _async_recover_monitor_status(self) -> None:
-        """Recover a stale monitor after the appliance lost mains power."""
+        """Replace a stale monitor with one new persistent connection."""
 
         async with self._monitor_lock:
             status_task = self._status_task
@@ -253,16 +246,10 @@ class EmerioDevice:
             self.monitor_connected = False
             self.command_reachable = False
 
-            try:
-                dps = await self.hass.async_add_executor_job(self._refresh_sync)
-            except Exception as err:
-                self.last_error = f"Statusabfrage: {err}"
-                self._notify()
-                await self._async_start_monitor_transport()
-                raise EmerioCommunicationError(self.last_error) from err
-
-            self._apply_device_dps(dps)
-            await self._async_start_monitor_transport()
+            if not await self._async_start_monitor_transport():
+                raise EmerioCommunicationError(
+                    self.last_error or "Dauerverbindung ist nicht verfügbar"
+                )
 
     async def async_wait_for_device_dp(
         self, dp: int, expected: Any, timeout: float = 2.0
@@ -349,7 +336,7 @@ class EmerioDevice:
                     "set_multiple_values",
                     {str(dp): value for dp, value in pending.items()},
                 )
-            self._schedule_status_sequence(initial_delay=0.1)
+            self._schedule_status_request()
         else:
             self.last_error = f"Verbindungsaufbau: {error}"
         self._notify()
@@ -414,9 +401,7 @@ class EmerioDevice:
         self._monitor.command(self._monitor_device, method, *args)
 
     @callback
-    def _schedule_status_sequence(
-        self, *, initial_delay: float = 0.0, force: bool = False
-    ) -> None:
+    def _schedule_status_request(self, *, force: bool = False) -> None:
         if not self.monitor_connected or self._stopping:
             return
         if self._status_task is not None and not self._status_task.done():
@@ -424,24 +409,15 @@ class EmerioDevice:
                 return
             self._status_task.cancel()
         self._status_task = self.hass.async_create_task(
-            self._async_status_sequence(initial_delay),
+            self._async_status_request(),
             f"emerio_local_status_{self.device_id}",
         )
 
-    async def _async_status_sequence(self, initial_delay: float) -> None:
+    async def _async_status_request(self) -> None:
         try:
-            if initial_delay:
-                await asyncio.sleep(initial_delay)
             if not self.monitor_connected:
                 return
             self._queue_monitor_command("status")
-            await asyncio.sleep(_STATUS_REQUEST_SPACING)
-            if not self.monitor_connected:
-                return
-            self._queue_monitor_command("status")
-            await asyncio.sleep(_STATUS_REQUEST_SPACING)
-            if self.monitor_connected:
-                self._queue_monitor_command("updatedps", list(KNOWN_DPS))
         except asyncio.CancelledError:
             raise
         except Exception as err:  # pragma: no cover - defensive background boundary
@@ -459,50 +435,17 @@ class EmerioDevice:
         """Poll once and restore the monitor even for status-blind firmware."""
 
         if self._monitor_registered:
-            self._schedule_status_sequence()
+            self._schedule_status_request()
             return
 
         async with self._monitor_lock:
             if self._monitor_registered:
                 return
-            try:
-                dps = await self.hass.async_add_executor_job(self._refresh_sync)
-            except Exception as err:
-                self.command_reachable = False
-                self.last_error = f"Statusabfrage: {err}"
-                self._notify()
-                # This firmware can complete the 3.4 handshake and accept
-                # commands while its synchronous status query still times out.
-                # Reopen the passive monitor regardless so later pushes and
-                # control responses remain observable.
-                await self._async_start_monitor_transport()
-                return
-            self._apply_device_dps(dps)
             await self._async_start_monitor_transport()
 
-    def _write_dps_sync(self, dps: dict[int, Any]) -> None:
-        device = self._new_tuya_device(timeout=3.0, persist=False)
-        try:
-            payload = {str(dp): value for dp, value in dps.items()}
-            result = device.set_multiple_values(payload, nowait=True)
-            _raise_for_tuya_error(result)
-        finally:
-            device.close()
+    def _new_tuya_device(self, timeout: float):
+        """Create the sole runtime transport as a persistent Tuya socket."""
 
-    def _refresh_sync(self) -> dict[str, Any]:
-        device = self._new_tuya_device(timeout=2.0, persist=False)
-        try:
-            device.set_dpsUsed({str(dp): None for dp in KNOWN_DPS})
-            result = device.status()
-            _raise_for_tuya_error(result)
-            dps = _extract_dps(result)
-            if not dps:
-                raise EmerioCommunicationError("Gerät lieferte keine Datenpunkte")
-            return dps
-        finally:
-            device.close()
-
-    def _new_tuya_device(self, timeout: float, persist: bool):
         device = tinytuya.OutletDevice(
             self.device_id,
             self.host,
@@ -510,10 +453,13 @@ class EmerioDevice:
             dev_type="default",
             connection_timeout=timeout,
             version=PROTOCOL_VERSION,
-            persist=persist,
+            persist=True,
             connection_retry_limit=1,
             connection_retry_delay=0,
         )
+        # Keep TinyTuya's recommended persistent-socket policy explicit and
+        # testable even though the constructor's persist=True sets it already.
+        device.set_socketPersistent(True)
         device.set_socketTimeout(timeout)
         device.set_socketRetryLimit(1)
         device.set_socketRetryDelay(0)
