@@ -12,11 +12,13 @@ from homeassistant.const import (
     ATTR_UNIT_OF_MEASUREMENT,
     CONF_HOST,
     CONF_NAME,
+    EVENT_HOMEASSISTANT_STARTED,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
     UnitOfPower,
 )
 from homeassistant.core import (
+    CoreState,
     Event,
     EventStateChangedData,
     HomeAssistant,
@@ -51,38 +53,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         local_key=entry.data[CONF_LOCAL_KEY],
     )
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = device
-    power_sensor = entry.options.get(CONF_POWER_SENSOR) or _find_power_sensor(
-        hass, device.name
-    )
+    configured_power_sensor = entry.options.get(CONF_POWER_SENSOR)
+    power_sensor = configured_power_sensor or _find_power_sensor(hass, device.name)
     if power_sensor:
-        device.configure_power_fallback(
-            power_sensor,
-            float(
-                entry.options.get(
-                    CONF_POWER_ON_THRESHOLD, DEFAULT_POWER_ON_THRESHOLD
-                )
-            ),
-            float(
-                entry.options.get(
-                    CONF_COMPRESSOR_THRESHOLD, DEFAULT_COMPRESSOR_THRESHOLD
-                )
-            ),
-        )
+        _setup_power_fallback(hass, entry, device, power_sensor)
+    elif configured_power_sensor is None and hass.state is not CoreState.running:
 
         @callback
-        def _handle_power_change(
-            event: Event[EventStateChangedData],
-        ) -> None:
-            _apply_power_state(device, event.data["new_state"])
+        def _detect_power_sensor_after_start(_event: Event) -> None:
+            discovered_power_sensor = _find_power_sensor(hass, device.name)
+            if discovered_power_sensor:
+                _setup_power_fallback(
+                    hass,
+                    entry,
+                    device,
+                    discovered_power_sensor,
+                )
 
         entry.async_on_unload(
-            async_track_state_change_event(
-                hass,
-                [power_sensor],
-                _handle_power_change,
+            hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STARTED,
+                _detect_power_sensor_after_start,
             )
         )
-        _apply_power_state(device, hass.states.get(power_sensor))
 
     await device.async_start()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -98,6 +91,47 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await device.async_stop()
         hass.data[DOMAIN].pop(entry.entry_id, None)
     return unloaded
+
+
+@callback
+def _setup_power_fallback(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    device: EmerioDevice,
+    power_sensor: str,
+) -> None:
+    """Configure and track one external power sensor."""
+
+    device.configure_power_fallback(
+        power_sensor,
+        float(
+            entry.options.get(
+                CONF_POWER_ON_THRESHOLD,
+                DEFAULT_POWER_ON_THRESHOLD,
+            )
+        ),
+        float(
+            entry.options.get(
+                CONF_COMPRESSOR_THRESHOLD,
+                DEFAULT_COMPRESSOR_THRESHOLD,
+            )
+        ),
+    )
+
+    @callback
+    def _handle_power_change(
+        event: Event[EventStateChangedData],
+    ) -> None:
+        _apply_power_state(device, event.data["new_state"])
+
+    entry.async_on_unload(
+        async_track_state_change_event(
+            hass,
+            [power_sensor],
+            _handle_power_change,
+        )
+    )
+    _apply_power_state(device, hass.states.get(power_sensor))
 
 
 def _find_power_sensor(hass: HomeAssistant, device_name: str) -> str | None:

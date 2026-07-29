@@ -108,7 +108,9 @@ Versionen als Update.
 Unter **Einstellungen → Geräte & Dienste → Emerio Local → Konfigurieren** kann
 ein Leistungssensor ausgewählt werden. Ohne explizite Auswahl verwendet die
 Integration automatisch genau einen eindeutig nach dem Klimagerät benannten
-Power-Sensor, sofern sie einen findet.
+Power-Sensor, sofern sie einen findet. Beim vollständigen Home-Assistant-Start
+wird diese automatische Suche nach dem Laden aller anderen Integrationen noch
+einmal ausgeführt, damit ein später geladener Shelly-Sensor berücksichtigt wird.
 
 Die voreingestellten Grenzen sind:
 
