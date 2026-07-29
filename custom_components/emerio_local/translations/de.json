@@ -64,6 +64,22 @@
       "no_supported_devices": "Das Smart-Life-Konto hat kein unterstütztes Emerio- oder Klarstein-Klimagerät mit lokalen Zugangsdaten geliefert. Die manuelle Einrichtung bleibt verfügbar."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Leistungssensor-Fallback",
+        "description": "Optionaler Ersatz, wenn das Klimagerät keinen lokalen Tuya-Status zurückgibt. Der Verbrauch unterscheidet Aus, Lüfter/Kompressorpause und aktiven Kompressor. Er liefert keine Temperatur und kann Kühlen nicht ohne den zuletzt gewählten Modus von Entfeuchten unterscheiden.",
+        "data": {
+          "power_sensor": "Leistungssensor",
+          "power_on_threshold": "Schwelle Gerät an",
+          "compressor_threshold": "Schwelle Kompressor aktiv"
+        }
+      }
+    },
+    "error": {
+      "invalid_power_thresholds": "Die Kompressorschwelle muss höher als die Einschaltgrenze sein."
+    }
+  },
   "selector": {
     "setup_method": {
       "options": {

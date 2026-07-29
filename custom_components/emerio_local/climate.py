@@ -6,10 +6,10 @@ import asyncio
 
 from homeassistant.components.climate import ClimateEntity
 from homeassistant.components.climate.const import (
-    HVACAction,
-    HVACMode,
     PRESET_NONE,
     ClimateEntityFeature,
+    HVACAction,
+    HVACMode,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, PRECISION_WHOLE, UnitOfTemperature
@@ -82,6 +82,11 @@ class EmerioClimate(EmerioEntity, ClimateEntity):
     def hvac_action(self) -> HVACAction:
         if not self.device.state.power:
             return HVACAction.OFF
+        if self.device.power_watts is not None:
+            if not self.device.compressor_active:
+                return HVACAction.FAN
+            if self.device.state.hvac_mode == "fan_only":
+                return HVACAction.FAN
         return {
             "cool": HVACAction.COOLING,
             "dry": HVACAction.DRYING,

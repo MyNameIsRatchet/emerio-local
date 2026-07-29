@@ -6,6 +6,9 @@ DOMAIN = "emerio_local"
 
 CONF_DEVICE_ID = "device_id"
 CONF_LOCAL_KEY = "local_key"
+CONF_POWER_SENSOR = "power_sensor"
+CONF_POWER_ON_THRESHOLD = "power_on_threshold"
+CONF_COMPRESSOR_THRESHOLD = "compressor_threshold"
 CONF_SETUP_METHOD = "setup_method"
 CONF_USER_CODE = "user_code"
 
@@ -20,6 +23,8 @@ TUYA_CLIENT_ID = "HA_3y9q4ak7g4ephrvke"
 TUYA_SCHEMA = "haauthorize"
 
 DEFAULT_NAME = "Emerio Klimaanlage"
+DEFAULT_POWER_ON_THRESHOLD = 10.0
+DEFAULT_COMPRESSOR_THRESHOLD = 300.0
 PROTOCOL_VERSION = 3.4
 TUYA_PORT = 6668
 

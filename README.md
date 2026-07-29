@@ -7,6 +7,20 @@
 Experimentelle Home-Assistant-Integration für den Emerio PAC-127111.1 und
 Klarstein-kompatible Tuya-3.4-Klimageräte mit Product-ID `bvgvah9atllpyt5s`.
 
+## Aktuelle Einschränkung
+
+Bei der hier untersuchten Geräte-/Firmware-Kombination funktionieren lokale
+Steuerbefehle zuverlässig, eine vollständige lokale Tuya-Statusantwort lässt
+sich derzeit aber nicht zuverlässig abrufen. Insbesondere die aktuelle
+Temperatur bleibt ohne echten DPS-Frame leer. Die Integration erfindet dafür
+keinen Wert.
+
+`UPDATEDPS` wird beim Verbindungsaufbau einmal über den persistenten Socket
+versucht. Bleibt auch diese Antwort aus, kann ein externer Leistungssensor als
+klar gekennzeichneter `power_fallback` wenigstens Aus/An und die aktuelle
+Arbeitsphase schätzen. Das ist keine echte Tuya-Rückmeldung und ersetzt keine
+Temperaturmessung.
+
 ## Warum eine eigene Integration?
 
 Das untersuchte Gerät akzeptiert lokale Schreibbefehle, beantwortet die übliche
@@ -14,15 +28,13 @@ synchrone Tuya-Statusabfrage aber nicht zuverlässig. Andere Integrationen warte
 auf genau diese Antwort, markieren das Gerät als offline oder verlieren nach
 einem ausgeführten Befehl den Zustand.
 
-Emerio Local handelt den ersten Status wie `tuya-local` über frische,
-nichtpersistente Verbindungen aus. Reagiert das Gerät nicht auf die bekannte
-3.4-Abfrage, probiert die Integration die von `tuya-local` unterstützten
-Protokollvarianten einzeln und mit Pause. Liefert keine davon Daten, öffnet die
-Integration anschließend einen rein passiven, persistenten 3.4-Socket. So
-können Control-Antworten und spontane Push-Meldungen ankommen, ohne das Gerät
-weiter mit Statusabfragen zu belasten. Hat eine Variante echte Datenpunkte
-geliefert, läuft auch die spätere schonende Statusabfrage über den persistenten
-Socket. Ein Heartbeat hält die jeweilige Verbindung aktiv.
+Emerio Local öffnet direkt genau eine persistente Tuya-3.4-Verbindung. Nach dem
+Verbindungsaufbau fordert sie mit Tuya `UPDATEDPS` einmal die bekannten
+Datenpunkte an. Dieser Alternativweg war Bestandteil des früher am echten Gerät
+bestätigten Anfangsstands und vermeidet die vom Gerät nicht beantwortete normale
+`status()`-Abfrage. Danach verarbeitet derselbe Socket Control-Antworten und
+spontane Push-Meldungen, ohne das Gerät weiter mit Statusabfragen zu belasten.
+Ein Heartbeat hält die Verbindung aktiv.
 
 Nur bis eine echte Rückmeldung eintrifft, zeigt Home Assistant den gesendeten
 Wert als **optimistischen/angenommenen Zustand**. Das verhindert, dass die UI
@@ -39,10 +51,9 @@ Ausschaltbefehl mehr anbietet.
   dafür nicht benötigt.
 - **Keine gespeicherten Cloud-Tokens:** Benutzercode, QR-, Access- und
   Refresh-Token existieren nur während des Einrichtungsdialogs.
-- **Verlässliche Tuya-3.4-Verbindung:** Frische Verbindungen handeln den ersten
-  Gerätestatus aus; danach verarbeitet ein persistenter Socket Befehlsantworten
-  und spontane Gerätemeldungen. Bleibt der Status stumm, lauscht der Socket
-  passiv und sendet außer Heartbeats keine Leseabfragen.
+- **Verlässliche Tuya-3.4-Verbindung:** Ein persistenter Socket verarbeitet
+  Befehlsantworten und spontane Gerätemeldungen. Beim Verbindungsaufbau wird
+  einmal `UPDATEDPS` gesendet; danach lauscht er passiv.
 - **Schonende Statusabfrage:** Keine zusätzlichen Sockets und keine
   Status-Bursts nach Befehlen; Heartbeats halten die einzige Verbindung offen.
 - **Vollständige Klimasteuerung:** Ein/Aus, Kühlen, Entfeuchten, Nur Lüften,
@@ -51,8 +62,12 @@ Ausschaltbefehl mehr anbietet.
   Power-Schalter als Fallback.
 - **Firmwaregerechte Moduswechsel:** Nach dem Einschalten wartet die Integration
   auf die Power-Bestätigung und die notwendige kurze Geräte-Settle-Zeit.
-- **Echte Zustandsrückmeldung:** Bestätigte Gerätewerte ersetzen automatisch den
-  nur vorübergehend optimistischen UI-Zustand.
+- **Echte Zustandsrückmeldung, wenn vorhanden:** Bestätigte Gerätewerte ersetzen
+  automatisch den nur vorübergehend optimistischen UI-Zustand. Auf betroffener
+  Firmware kann diese Rückmeldung vollständig ausbleiben.
+- **Leistungssensor-Fallback:** Ein optionaler Leistungssensor korrigiert einen
+  unbekannten/optimistischen Aus-Zustand und unterscheidet Standby, Lüfter bzw.
+  Kompressorpause und aktiven Kompressor.
 - **Robuster Reconnect:** Bei einem Verbindungsabbruch werden ausstehende
   Datenpunkte vorgemerkt und nach dem Wiederaufbau übertragen.
 - **Erholung nach Netztrennung:** Ein nach Shelly- oder Stromtrennung veralteter
@@ -87,6 +102,24 @@ Ausschaltbefehl mehr anbietet.
 HACS installiert die Integration nach
 `/config/custom_components/emerio_local` und meldet neue veröffentlichte
 Versionen als Update.
+
+### Optionaler Leistungssensor
+
+Unter **Einstellungen → Geräte & Dienste → Emerio Local → Konfigurieren** kann
+ein Leistungssensor ausgewählt werden. Ohne explizite Auswahl verwendet die
+Integration automatisch genau einen eindeutig nach dem Klimagerät benannten
+Power-Sensor, sofern sie einen findet.
+
+Die voreingestellten Grenzen sind:
+
+- unter 10 W: Gerät aus
+- 10–300 W: Gerät an, Lüfter oder Kompressorpause
+- über 300 W: Gerät an, Kompressor aktiv
+
+Die Grenzen sind einstellbar. Auch 600 W gelten damit als aktiver Kompressor.
+Kühlen und Entfeuchten lassen sich allein anhand der Leistung nicht sicher
+unterscheiden; dafür bleibt der zuletzt gewählte Modus erhalten. Die aktuelle
+Temperatur kann aus der Leistung grundsätzlich nicht abgeleitet werden.
 
 ### Datenschutz beim Smart-Life-Onboarding
 
@@ -123,15 +156,15 @@ mit dem Klimagerät; für den Betrieb ist keine Tuya-Cloud-Verbindung erforderli
 `device` bedeutet: Mindestens ein bekannter Datenpunkt kam tatsächlich vom
 Klimagerät. `optimistic` bedeutet: Home Assistant zeigt vorübergehend den zuletzt
 gesendeten Wert, weil noch keine auswertbare Rückmeldung eingetroffen ist.
+`power_fallback` bedeutet: Aus/An und die Arbeitsphase wurden aus einem externen
+Leistungssensor abgeleitet; Zielmodus und Sollwert stammen weiterhin aus dem
+letzten gesendeten Zustand, die Ist-Temperatur bleibt unbekannt.
 
-Bis zur ersten echten Statusantwort probiert die Integration mit mindestens fünf
-Sekunden Abstand jeweils eine Protokollvariante über eine frische Verbindung und
-wartet dabei wie `tuya-local` bis zu fünf Sekunden auf die Antwort. Bleibt ein
-vollständiger Zyklus erfolglos, öffnet sie einen persistenten 3.4-Monitor, der
-nur auf spontane Meldungen und Befehlsantworten lauscht. Der bekannte
-3.4-Befehlspfad bleibt während der rein lesenden Erkennung unverändert.
-Statusabfragen im 30-Sekunden-Takt werden ausschließlich dann aktiviert, wenn
-der anfängliche Status-Handshake tatsächlich Daten geliefert hat.
+Beim Start und nach einem echten Verbindungsabbruch sendet die Integration über
+den persistenten 3.4-Socket genau eine `UPDATEDPS`-Anfrage für die bekannten
+Datenpunkte. Sie sendet weder die auf diesem Gerät erfolglose normale
+`status()`-Abfrage noch einen automatischen Protokollrundlauf. Nach der
+einmaligen Anfrage bleiben nur Heartbeats, Befehle und passive Antworten aktiv.
 
 ## Logging
 

@@ -64,6 +64,22 @@
       "no_supported_devices": "The Smart Life account did not return a supported Emerio or Klarstein air conditioner with local credentials. Manual setup remains available."
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Power sensor fallback",
+        "description": "Optional fallback when the air conditioner does not return local Tuya status. Power consumption can identify off, fan/compressor pause, and active compressor operation. It cannot provide a temperature or distinguish cooling from drying without the last selected mode.",
+        "data": {
+          "power_sensor": "Power sensor",
+          "power_on_threshold": "Device-on threshold",
+          "compressor_threshold": "Compressor-active threshold"
+        }
+      }
+    },
+    "error": {
+      "invalid_power_thresholds": "The compressor threshold must be higher than the device-on threshold."
+    }
+  },
   "selector": {
     "setup_method": {
       "options": {

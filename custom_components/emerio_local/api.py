@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import PROTOCOL_VERSION
-from .mapping import KNOWN_DPS, EmerioState, apply_dps
+from .mapping import DP_POWER, KNOWN_DPS, EmerioState, apply_dps
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,6 +69,12 @@ class EmerioDevice:
         self.last_device_dps: dict[str, Any] | None = None
         self.last_status_protocol: str | None = None
         self.last_error: str | None = None
+        self.power_sensor_entity_id: str | None = None
+        self.power_watts: float | None = None
+        self.power_fallback_active = False
+        self.compressor_active: bool | None = None
+        self._power_on_threshold = 10.0
+        self._compressor_threshold = 300.0
 
         self._lock = asyncio.Lock()
         self._monitor_lock = asyncio.Lock()
@@ -80,6 +86,7 @@ class EmerioDevice:
         self._monitor_device: Any | None = None
         self._monitor_registered = False
         self._status_requests_enabled = False
+        self._passive_updatedps_sent = False
         self._bootstrap_protocol_index = 0
         self.bootstrap_cycle_exhausted = False
         self._active_protocol = PROTOCOL_VERSION
@@ -103,11 +110,44 @@ class EmerioDevice:
         for listener in tuple(self._listeners):
             listener()
 
+    @callback
+    def configure_power_fallback(
+        self,
+        entity_id: str,
+        power_on_threshold: float,
+        compressor_threshold: float,
+    ) -> None:
+        """Configure an external power sensor as an honest state fallback."""
+
+        self.power_sensor_entity_id = entity_id
+        self._power_on_threshold = power_on_threshold
+        self._compressor_threshold = compressor_threshold
+
+    @callback
+    def apply_power_fallback(self, watts: float) -> None:
+        """Infer power/activity when DP1 is missing or contradicts measured watts."""
+
+        self.power_watts = watts
+        self.compressor_active = watts >= self._compressor_threshold
+        inferred_power = watts >= self._power_on_threshold
+        if (
+            DP_POWER in self.state.confirmed_dps
+            and self.state.power == inferred_power
+        ):
+            self.power_fallback_active = False
+            self._notify()
+            return
+
+        self.state.power = inferred_power
+        self.state.source = "power_fallback"
+        self.power_fallback_active = True
+        self._notify()
+
     async def async_start(self) -> None:
-        """Negotiate status first, then keep one Tuya 3.4 session open."""
+        """Open one passive Tuya 3.4 session and request one DP update."""
 
         self._stopping = False
-        await self._async_bootstrap_then_monitor()
+        await self._async_start_monitor_transport(status_requests=False)
         self._poll_task = self.hass.async_create_background_task(
             self._async_poll_loop(), f"emerio_local_poll_{self.device_id}"
         )
@@ -118,6 +158,7 @@ class EmerioDevice:
         """Create the persistent monitor without changing the poll task."""
 
         self._status_requests_enabled = status_requests
+        self._passive_updatedps_sent = status_requests
         self._monitor_device = self._new_tuya_device(
             timeout=_STATUS_CONNECTION_TIMEOUT,
             persist=True,
@@ -138,6 +179,7 @@ class EmerioDevice:
         except Exception as err:
             self._monitor_registered = False
             self._status_requests_enabled = False
+            self._passive_updatedps_sent = False
             self.monitor_connected = False
             self.command_reachable = False
             self.last_error = f"Dauerverbindung: {err}"
@@ -159,12 +201,12 @@ class EmerioDevice:
         self.last_error = (
             None
             if status_requests
-            else "Keine Statusantwort; passiver 3.4-Monitor aktiv"
+            else "Passiver 3.4-Monitor aktiv; warte auf DPS"
         )
         self._notify()
 
-        # A passive fallback listens only for device pushes and command
-        # responses. Active polling starts only after a real status handshake.
+        # The passive transport sends exactly one UPDATEDPS request, then
+        # listens only for device pushes and command responses.
         self._schedule_status_request()
         return True
 
@@ -191,6 +233,7 @@ class EmerioDevice:
         self._monitor_device = None
         self._monitor_registered = False
         self._status_requests_enabled = False
+        self._passive_updatedps_sent = False
         self.monitor_connected = False
         self.command_reachable = False
 
@@ -245,13 +288,17 @@ class EmerioDevice:
             if self._monitor_registered:
                 await self._async_recover_monitor_status()
             else:
-                self.bootstrap_cycle_exhausted = False
-            if (
-                not self._monitor_registered
-                and not await self._async_bootstrap_then_monitor()
-            ):
+                if not await self._async_start_monitor_transport(
+                    status_requests=False
+                ):
+                    raise EmerioCommunicationError(
+                        self.last_error
+                        or "Dauerverbindung zum Gerät konnte nicht aufgebaut werden"
+                    )
+            if not self._monitor_registered:
                 raise EmerioCommunicationError(
-                    self.last_error or "Statusabfrage: Gerät lieferte keine Datenpunkte"
+                    self.last_error
+                    or "Dauerverbindung zum Gerät konnte nicht aufgebaut werden"
                 )
             return
 
@@ -261,13 +308,17 @@ class EmerioDevice:
         try:
             await asyncio.wait_for(waiter, timeout=_STATUS_TIMEOUT)
         except TimeoutError:
+            if not self._status_requests_enabled:
+                self.last_error = "UPDATEDPS: Gerät lieferte keine Datenpunkte"
+                self._notify()
+                raise EmerioCommunicationError(self.last_error)
             await self._async_recover_monitor_status()
             return
         finally:
             self._status_waiters.discard(waiter)
 
     async def _async_recover_monitor_status(self) -> None:
-        """Re-negotiate status before replacing a stale persistent connection."""
+        """Replace a stale monitor without issuing a normal status query."""
 
         async with self._monitor_lock:
             status_task = self._status_task
@@ -282,12 +333,16 @@ class EmerioDevice:
             self._monitor_device = None
             self._monitor_registered = False
             self._status_requests_enabled = False
+            self._passive_updatedps_sent = False
             self.monitor_connected = False
             self.command_reachable = False
 
-            if not await self._async_bootstrap_then_monitor_locked():
+            if not await self._async_start_monitor_transport(
+                status_requests=False
+            ):
                 raise EmerioCommunicationError(
-                    self.last_error or "Statusabfrage: Gerät lieferte keine Datenpunkte"
+                    self.last_error
+                    or "Dauerverbindung zum Gerät konnte nicht aufgebaut werden"
                 )
 
     async def _async_bootstrap_then_monitor(self) -> bool:
@@ -344,6 +399,12 @@ class EmerioDevice:
         """Return whether the persistent transport may actively query status."""
 
         return self._status_requests_enabled
+
+    @property
+    def passive_updatedps_sent(self) -> bool:
+        """Return whether the one-shot passive DP refresh was queued."""
+
+        return self._passive_updatedps_sent
 
     @property
     def _current_bootstrap_protocol(self) -> tuple[str, float, bool]:
@@ -449,6 +510,7 @@ class EmerioDevice:
     def _handle_monitor_disconnect(self, error: Any) -> None:
         self.monitor_connected = False
         self.command_reachable = False
+        self._passive_updatedps_sent = False
         self.last_disconnect_at = datetime.now(timezone.utc)
         self.last_error = f"Verbindung getrennt: {error}"
         self._notify()
@@ -486,6 +548,8 @@ class EmerioDevice:
 
         if not apply_dps(self.state, accepted_dps, "device"):
             return
+        if any(int(dp) == DP_POWER for dp in accepted_dps if str(dp).isdigit()):
+            self.power_fallback_active = False
         if self.last_device_dps is None:
             self.last_device_dps = {}
         self.last_device_dps.update(
@@ -506,20 +570,37 @@ class EmerioDevice:
 
     @callback
     def _schedule_status_request(self, *, force: bool = False) -> None:
-        if (
-            not self._status_requests_enabled
-            or not self.monitor_connected
-            or self._stopping
-        ):
+        if not self.monitor_connected or self._stopping:
             return
         if self._status_task is not None and not self._status_task.done():
             if not force:
                 return
             self._status_task.cancel()
+        if not self._status_requests_enabled:
+            if self._passive_updatedps_sent and not force:
+                return
+            self._passive_updatedps_sent = True
+            self._status_task = self.hass.async_create_task(
+                self._async_passive_updatedps_request(),
+                f"emerio_local_updatedps_{self.device_id}",
+            )
+            return
         self._status_task = self.hass.async_create_task(
             self._async_status_request(),
             f"emerio_local_status_{self.device_id}",
         )
+
+    async def _async_passive_updatedps_request(self) -> None:
+        """Ask once for known DPs without issuing the failing status command."""
+
+        try:
+            if not self.monitor_connected:
+                return
+            self._queue_monitor_command("updatedps", list(KNOWN_DPS))
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # pragma: no cover - defensive background boundary
+            _LOGGER.debug("Unable to request Emerio DP update: %s", err)
 
     async def _async_status_request(self) -> None:
         try:
@@ -549,7 +630,7 @@ class EmerioDevice:
             raise
 
     async def _async_poll_once(self) -> None:
-        """Poll persistently, or retry bootstrap on a fresh connection."""
+        """Keep the passive monitor alive without periodic status queries."""
 
         if self._monitor_registered and self.monitor_connected:
             self._schedule_status_request()
@@ -562,8 +643,7 @@ class EmerioDevice:
                 return
             return
 
-        self.bootstrap_cycle_exhausted = False
-        await self._async_bootstrap_then_monitor()
+        await self._async_start_monitor_transport(status_requests=False)
 
     def _write_dps_sync(self, dps: dict[int, Any]) -> None:
         """Send a command on a fresh socket while status is still bootstrapping."""

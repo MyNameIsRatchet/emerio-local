@@ -35,7 +35,7 @@ class EmerioStateSourceSensor(EmerioEntity, SensorEntity):
     _attr_name = "Statusquelle"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.ENUM
-    _attr_options = ["unknown", "optimistic", "device", "error"]
+    _attr_options = ["unknown", "optimistic", "power_fallback", "device", "error"]
     _attr_icon = "mdi:lan-connect"
 
     def __init__(self, device: EmerioDevice) -> None:
@@ -43,6 +43,8 @@ class EmerioStateSourceSensor(EmerioEntity, SensorEntity):
 
     @property
     def native_value(self) -> str:
+        if self.device.power_fallback_active:
+            return "power_fallback"
         if self.device.last_error:
             return "error"
         return self.device.state.source

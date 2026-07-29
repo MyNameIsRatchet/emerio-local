@@ -7,12 +7,18 @@ from typing import Any
 
 import tinytuya
 import voluptuous as vol
-
 from homeassistant import config_entries
+from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.config_entries import ConfigEntry, OptionsFlowWithReload
 from homeassistant.const import CONF_HOST, CONF_NAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
+    EntitySelector,
+    EntitySelectorConfig,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     QrCodeSelector,
     QrCodeSelectorConfig,
     QrErrorCorrectionLevel,
@@ -30,11 +36,16 @@ from .api import (
 )
 from .cloud import TuyaCloudDevice, TuyaCloudError, TuyaCloudSession
 from .const import (
+    CONF_COMPRESSOR_THRESHOLD,
     CONF_DEVICE_ID,
     CONF_LOCAL_KEY,
+    CONF_POWER_ON_THRESHOLD,
+    CONF_POWER_SENSOR,
     CONF_SETUP_METHOD,
     CONF_USER_CODE,
+    DEFAULT_COMPRESSOR_THRESHOLD,
     DEFAULT_NAME,
+    DEFAULT_POWER_ON_THRESHOLD,
     DOMAIN,
     SETUP_METHOD_CLOUD,
     SETUP_METHOD_MANUAL,
@@ -54,6 +65,15 @@ class EmerioLocalConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._cloud_devices: dict[str, TuyaCloudDevice] = {}
         self._cloud_device: TuyaCloudDevice | None = None
         self._discovered_host = ""
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> EmerioLocalOptionsFlow:
+        """Return the power-fallback options flow."""
+
+        return EmerioLocalOptionsFlow()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -320,6 +340,71 @@ class EmerioLocalConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors or {},
             description_placeholders=placeholders or {},
         )
+
+
+class EmerioLocalOptionsFlow(OptionsFlowWithReload):
+    """Configure the optional external power-sensor fallback."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Configure the sensor and watt thresholds."""
+
+        if user_input is not None:
+            if (
+                user_input[CONF_COMPRESSOR_THRESHOLD]
+                <= user_input[CONF_POWER_ON_THRESHOLD]
+            ):
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=self._options_schema(user_input),
+                    errors={"base": "invalid_power_thresholds"},
+                )
+            return self.async_create_entry(data=user_input)
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self._options_schema(self.config_entry.options),
+        )
+
+    def _options_schema(self, suggested: dict[str, Any]) -> vol.Schema:
+        """Build the options form with existing values suggested."""
+
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_POWER_SENSOR): EntitySelector(
+                    EntitySelectorConfig(
+                        domain="sensor",
+                        device_class=SensorDeviceClass.POWER,
+                    )
+                ),
+                vol.Required(
+                    CONF_POWER_ON_THRESHOLD,
+                    default=DEFAULT_POWER_ON_THRESHOLD,
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=0,
+                        max=100,
+                        step=1,
+                        mode=NumberSelectorMode.BOX,
+                        unit_of_measurement="W",
+                    )
+                ),
+                vol.Required(
+                    CONF_COMPRESSOR_THRESHOLD,
+                    default=DEFAULT_COMPRESSOR_THRESHOLD,
+                ): NumberSelector(
+                    NumberSelectorConfig(
+                        min=50,
+                        max=2500,
+                        step=10,
+                        mode=NumberSelectorMode.BOX,
+                        unit_of_measurement="W",
+                    )
+                ),
+            }
+        )
+        return self.add_suggested_values_to_schema(schema, suggested)
 
 
 async def _async_validate_input(hass: HomeAssistant, data: dict[str, Any]) -> None:
