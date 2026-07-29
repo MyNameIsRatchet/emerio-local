@@ -49,6 +49,8 @@ class EmerioEntity(Entity):
             "last_command": self.device.last_command,
             "last_command_at": self.device.last_command_at,
             "last_status_at": self.device.last_status_at,
+            "last_status_protocol": self.device.last_status_protocol,
+            "bootstrap_protocol": self.device.bootstrap_protocol,
             "last_error": self.device.last_error,
         }
 

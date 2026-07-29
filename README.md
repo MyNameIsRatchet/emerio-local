@@ -14,14 +14,15 @@ synchrone Tuya-Statusabfrage aber nicht zuverlässig. Andere Integrationen warte
 auf genau diese Antwort, markieren das Gerät als offline oder verlieren nach
 einem ausgeführten Befehl den Zustand.
 
-Emerio Local handelt den ersten Status wie `tuya-local` über eine frische,
-nichtpersistente Tuya-3.4-Verbindung aus. Erst nachdem das Gerät echte
+Emerio Local handelt den ersten Status wie `tuya-local` über frische,
+nichtpersistente Verbindungen aus. Reagiert das Gerät nicht auf die bekannte
+3.4-Abfrage, probiert die Integration die von `tuya-local` unterstützten
+Protokollvarianten einzeln und mit Pause. Erst nachdem das Gerät echte
 Datenpunkte geliefert hat, hält die Integration genau eine persistente
-Verbindung offen. Befehle, Control-Antworten, spontane Push-Meldungen und spätere
-Statusanfragen laufen dann über denselben Socket. Ein Heartbeat hält ihn aktiv;
-höchstens eine Statusabfrage pro 30-Sekunden-Zyklus verhindert belastende
-Abfrage-Bursts. TinyTuya verwendet bei Bedarf automatisch das erkannte
-`device22`-Format.
+Verbindung mit der erfolgreichen Variante offen. Befehle, Control-Antworten,
+spontane Push-Meldungen und spätere Statusanfragen laufen dann über denselben
+Socket. Ein Heartbeat hält ihn aktiv; höchstens eine Statusabfrage pro
+30-Sekunden-Zyklus verhindert belastende Abfrage-Bursts.
 
 Nur bis eine echte Rückmeldung eintrifft, zeigt Home Assistant den gesendeten
 Wert als **optimistischen/angenommenen Zustand**. Das verhindert, dass die UI
@@ -122,12 +123,12 @@ mit dem Klimagerät; für den Betrieb ist keine Tuya-Cloud-Verbindung erforderli
 Klimagerät. `optimistic` bedeutet: Home Assistant zeigt vorübergehend den zuletzt
 gesendeten Wert, weil noch keine auswertbare Rückmeldung eingetroffen ist.
 
-Bis zur ersten echten Statusantwort fragt die Integration alle fünf Sekunden
-über jeweils eine frische Verbindung an. Danach lauscht sie auf spontane
-Meldungen und fragt über denselben persistenten Socket höchstens einmal alle
-30 Sekunden nach. Nach Befehlen wartet sie passiv auf die von Tuya vorgesehene
-Zustandsmeldung. Die Bedienung bleibt während des Status-Handshakes über frische
-Verbindungen möglich.
+Bis zur ersten echten Statusantwort probiert die Integration mit mindestens fünf
+Sekunden Abstand jeweils eine Protokollvariante über eine frische Verbindung.
+Der bekannte 3.4-Befehlspfad bleibt während dieser rein lesenden Erkennung
+unverändert. Danach lauscht sie auf spontane Meldungen und fragt über denselben
+persistenten Socket höchstens einmal alle 30 Sekunden nach. Nach Befehlen wartet
+sie passiv auf die von Tuya vorgesehene Zustandsmeldung.
 
 ## Logging
 

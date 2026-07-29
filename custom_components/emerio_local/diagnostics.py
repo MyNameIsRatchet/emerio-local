@@ -38,6 +38,8 @@ async def async_get_config_entry_diagnostics(
             "last_connect_at": _isoformat(device.last_connect_at),
             "last_disconnect_at": _isoformat(device.last_disconnect_at),
             "last_device_dps": device.last_device_dps,
+            "last_status_protocol": device.last_status_protocol,
+            "bootstrap_protocol": device.bootstrap_protocol,
             "last_error": device.last_error,
         },
     }

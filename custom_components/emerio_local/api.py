@@ -20,6 +20,14 @@ _LOGGER = logging.getLogger(__name__)
 _STATUS_TIMEOUT = 12.0
 _POLL_INTERVAL = 30.0
 _BOOTSTRAP_RETRY_INTERVAL = 5.0
+_BOOTSTRAP_PROTOCOLS = (
+    ("3.4", 3.4, False),
+    ("3.3", 3.3, False),
+    ("3.1", 3.1, False),
+    ("3.2", 3.2, True),
+    ("3.5", 3.5, False),
+    ("3.22", 3.3, True),
+)
 
 
 class EmerioCommunicationError(HomeAssistantError):
@@ -57,6 +65,7 @@ class EmerioDevice:
         self.last_connect_at: datetime | None = None
         self.last_disconnect_at: datetime | None = None
         self.last_device_dps: dict[str, Any] | None = None
+        self.last_status_protocol: str | None = None
         self.last_error: str | None = None
 
         self._lock = asyncio.Lock()
@@ -68,6 +77,9 @@ class EmerioDevice:
         self._monitor: Any | None = None
         self._monitor_device: Any | None = None
         self._monitor_registered = False
+        self._bootstrap_protocol_index = 0
+        self._active_protocol = PROTOCOL_VERSION
+        self._active_device22 = False
         self._poll_task: asyncio.Task[None] | None = None
         self._status_task: asyncio.Task[None] | None = None
         self._stopping = False
@@ -99,8 +111,12 @@ class EmerioDevice:
     async def _async_start_monitor_transport(self) -> bool:
         """Create the persistent monitor without changing the poll task."""
 
-        self._monitor_device = self._new_tuya_device(timeout=3.0, persist=True)
-        self._monitor_device.set_dpsUsed({str(dp): None for dp in KNOWN_DPS})
+        self._monitor_device = self._new_tuya_device(
+            timeout=3.0,
+            persist=True,
+            protocol_version=self._active_protocol,
+            force_device22=self._active_device22,
+        )
         self._monitor = tinytuya.Monitor(
             on_status=self._monitor_status_callback,
             on_connect=self._monitor_connect_callback,
@@ -266,22 +282,49 @@ class EmerioDevice:
     async def _async_bootstrap_then_monitor_locked(self) -> bool:
         """Bootstrap status while the monitor lock is held."""
 
+        protocol_label, protocol_version, force_device22 = (
+            self._current_bootstrap_protocol
+        )
         try:
-            dps = await self.hass.async_add_executor_job(self._refresh_sync)
+            dps = await self.hass.async_add_executor_job(
+                self._refresh_sync,
+                protocol_version,
+                force_device22,
+            )
         except Exception as err:
             self.monitor_connected = False
             self.command_reachable = False
-            self.last_error = f"Status-Bootstrap: {err}"
+            self.last_error = f"Status-Bootstrap {protocol_label}: {err}"
             _LOGGER.debug(
-                "Initial non-persistent status query to %s failed: %s",
+                "Initial non-persistent status query to %s with protocol %s failed: %s",
                 self.host,
+                protocol_label,
                 err,
             )
+            self._advance_bootstrap_protocol()
             self._notify()
             return False
 
+        self._active_protocol = protocol_version
+        self._active_device22 = force_device22
+        self.last_status_protocol = protocol_label
         self._apply_device_dps(dps)
         return await self._async_start_monitor_transport()
+
+    @property
+    def bootstrap_protocol(self) -> str:
+        """Return the protocol variant used by the next bootstrap attempt."""
+
+        return self._current_bootstrap_protocol[0]
+
+    @property
+    def _current_bootstrap_protocol(self) -> tuple[str, float, bool]:
+        return _BOOTSTRAP_PROTOCOLS[self._bootstrap_protocol_index]
+
+    def _advance_bootstrap_protocol(self) -> None:
+        self._bootstrap_protocol_index = (self._bootstrap_protocol_index + 1) % len(
+            _BOOTSTRAP_PROTOCOLS
+        )
 
     async def async_wait_for_device_dp(
         self, dp: int, expected: Any, timeout: float = 2.0
@@ -487,7 +530,11 @@ class EmerioDevice:
     def _write_dps_sync(self, dps: dict[int, Any]) -> None:
         """Send a command on a fresh socket while status is still bootstrapping."""
 
-        device = self._new_tuya_device(timeout=3.0, persist=False)
+        device = self._new_tuya_device(
+            timeout=3.0,
+            persist=False,
+            protocol_version=PROTOCOL_VERSION,
+        )
         try:
             payload = {str(dp): value for dp, value in dps.items()}
             result = device.set_multiple_values(payload, nowait=True)
@@ -495,12 +542,18 @@ class EmerioDevice:
         finally:
             device.close()
 
-    def _refresh_sync(self) -> dict[str, Any]:
+    def _refresh_sync(
+        self, protocol_version: float, force_device22: bool
+    ) -> dict[str, Any]:
         """Fetch initial DPS on a fresh connection, allowing device22 detection."""
 
-        device = self._new_tuya_device(timeout=3.0, persist=False)
+        device = self._new_tuya_device(
+            timeout=3.0,
+            persist=False,
+            protocol_version=protocol_version,
+            force_device22=force_device22,
+        )
         try:
-            device.set_dpsUsed({str(dp): None for dp in KNOWN_DPS})
             result = device.status()
             _raise_for_tuya_error(result)
             dps = _extract_dps(result)
@@ -510,20 +563,39 @@ class EmerioDevice:
         finally:
             device.close()
 
-    def _new_tuya_device(self, timeout: float, persist: bool):
+    def _new_tuya_device(
+        self,
+        timeout: float,
+        persist: bool,
+        protocol_version: float,
+        force_device22: bool = False,
+    ):
         """Create a Tuya transport for bootstrap or persistent monitoring."""
 
+        # TinyTuya's 3.2 setup probes many DPS immediately unless the request
+        # list already exists. Construct as 3.3, seed the known DPS, and only
+        # then switch to 3.2 to keep every bootstrap attempt to one query.
+        constructor_version = 3.3 if protocol_version == 3.2 else protocol_version
         device = tinytuya.OutletDevice(
             self.device_id,
             self.host,
             self._local_key,
             dev_type="default",
             connection_timeout=timeout,
-            version=PROTOCOL_VERSION,
+            version=constructor_version,
             persist=persist,
             connection_retry_limit=1,
             connection_retry_delay=0,
         )
+        device.set_dpsUsed({str(dp): None for dp in KNOWN_DPS})
+        if protocol_version == 3.2:
+            device.set_version(3.2)
+        if force_device22:
+            device.dev_type = "device22"
+            device.disabledetect = False
+            device.payload_dict = None
+        else:
+            device.disabledetect = protocol_version < 3.4
         device.set_socketPersistent(persist)
         device.set_socketTimeout(timeout)
         device.set_socketRetryLimit(1)
