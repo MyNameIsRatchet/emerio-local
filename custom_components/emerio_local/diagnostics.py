@@ -32,7 +32,6 @@ async def async_get_config_entry_diagnostics(
             },
             "command_reachable": device.command_reachable,
             "monitor_connected": device.monitor_connected,
-            "device_type": device.device_type,
             "last_command": device.last_command,
             "last_command_at": _isoformat(device.last_command_at),
             "last_status_at": _isoformat(device.last_status_at),
