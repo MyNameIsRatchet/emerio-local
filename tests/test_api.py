@@ -44,15 +44,19 @@ def test_22_character_ids_prefer_device22(api_module):
 def test_refresh_uses_device22_and_remembers_success(api_module):
     device = _device(api_module)
     created = []
+    fake_devices = []
 
     def new_device(*, timeout, persist, device_type=None):
         created.append((timeout, persist, device_type))
-        return FakeStatusDevice({"dps": {"3": 23}})
+        fake_device = FakeStatusDevice({"dps": {"3": 23}})
+        fake_devices.append(fake_device)
+        return fake_device
 
     device._new_tuya_device = new_device
 
     assert device._refresh_sync() == {"3": 23}
     assert created == [(2.0, False, "device22")]
+    assert fake_devices[0].requested_dps == {"1": None, "2": None, "3": None}
     assert device.device_type == "device22"
 
 
@@ -89,6 +93,47 @@ def test_monitor_commands_use_registered_proxy(api_module):
     device._queue_monitor_command("status")
 
     assert calls == ["status"]
+
+
+def test_device22_status_groups_are_small_and_cover_known_dps(api_module):
+    groups = api_module._status_request_groups("device22")
+
+    assert groups[0] == (1, 2, 3)
+    assert all(len(group) <= 3 for group in groups)
+    assert set().union(*map(set, groups)) == set(api_module.KNOWN_DPS)
+    assert all(1 in group for group in groups)
+
+
+def test_monitor_cycles_device22_status_groups(api_module, monkeypatch):
+    device = _device(api_module)
+    calls = []
+
+    class Handle:
+        def set_dpsUsed(self, dps):
+            calls.append(("set_dpsUsed", dps))
+
+        def status(self):
+            calls.append(("status",))
+
+        def updatedps(self, dps):
+            calls.append(("updatedps", dps))
+
+    monkeypatch.setattr(api_module, "_STATUS_REQUEST_SPACING", 0)
+    device._monitor_handle = Handle()
+    device.monitor_connected = True
+
+    asyncio.run(device._async_status_sequence(0))
+
+    expected = []
+    for group in api_module._DEVICE22_STATUS_GROUPS:
+        expected.extend(
+            [
+                ("set_dpsUsed", {str(dp): None for dp in group}),
+                ("status",),
+            ]
+        )
+    expected.append(("updatedps", list(api_module.KNOWN_DPS)))
+    assert calls == expected
 
 
 def test_recovery_preserves_status_error_after_reconnect(api_module):

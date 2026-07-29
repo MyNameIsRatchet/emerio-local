@@ -18,9 +18,11 @@ Emerio Local hält stattdessen eine Tuya-3.4-Verbindung offen. Befehle,
 Control-Antworten, spontane Push-Meldungen und Statusanfragen laufen dadurch über
 denselben Socket. Erkannte Datenpunkte werden als echter Gerätestatus nach Home
 Assistant übernommen. Geräte mit 22-stelliger Tuya-ID werden direkt im dafür
-vorgesehenen `device22`-Format abgefragt. Falls eine Statusabfrage damit oder im
-normalen Format fehlschlägt, probiert die Integration automatisch das jeweils
-andere Format und behält das funktionierende für die dauerhafte Verbindung bei.
+vorgesehenen `device22`-Format abgefragt. Dabei werden die Datenpunkte in kleine
+Gruppen aufgeteilt, weil die Emerio-Firmware große Abfragepakete still verwirft.
+Falls eine Statusabfrage damit oder im normalen Format fehlschlägt, probiert die
+Integration automatisch das jeweils andere Format und behält das funktionierende
+für die dauerhafte Verbindung bei.
 
 Nur bis eine echte Rückmeldung eintrifft, zeigt Home Assistant den gesendeten
 Wert als **optimistischen/angenommenen Zustand**. Das verhindert, dass die UI
@@ -48,8 +50,8 @@ Ausschaltbefehl mehr anbietet.
 - **Echte Zustandsrückmeldung:** Bestätigte Gerätewerte ersetzen automatisch den
   nur vorübergehend optimistischen UI-Zustand.
 - **Robuste Statusabfrage:** 22-stellige Tuya-Geräte-IDs verwenden direkt das
-  `device22`-Format; bei Zeitüberschreitungen wird das alternative Format
-  automatisch getestet.
+  `device22`-Format mit firmwareverträglichen DPS-Gruppen; bei
+  Zeitüberschreitungen wird das alternative Format automatisch getestet.
 - **Robuster Reconnect:** Bei einem Verbindungsabbruch werden ausstehende
   Datenpunkte vorgemerkt und nach dem Wiederaufbau übertragen.
 - **Erholung nach Netztrennung:** Ein nach Shelly- oder Stromtrennung veralteter
