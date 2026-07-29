@@ -51,6 +51,7 @@ class EmerioEntity(Entity):
             "last_status_at": self.device.last_status_at,
             "last_status_protocol": self.device.last_status_protocol,
             "bootstrap_protocol": self.device.bootstrap_protocol,
+            "bootstrap_cycle_exhausted": self.device.bootstrap_cycle_exhausted,
             "last_error": self.device.last_error,
         }
 

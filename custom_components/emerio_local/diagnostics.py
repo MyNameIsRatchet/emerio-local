@@ -40,6 +40,7 @@ async def async_get_config_entry_diagnostics(
             "last_device_dps": device.last_device_dps,
             "last_status_protocol": device.last_status_protocol,
             "bootstrap_protocol": device.bootstrap_protocol,
+            "bootstrap_cycle_exhausted": device.bootstrap_cycle_exhausted,
             "last_error": device.last_error,
         },
     }

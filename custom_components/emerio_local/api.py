@@ -20,6 +20,8 @@ _LOGGER = logging.getLogger(__name__)
 _STATUS_TIMEOUT = 12.0
 _POLL_INTERVAL = 30.0
 _BOOTSTRAP_RETRY_INTERVAL = 5.0
+_BOOTSTRAP_CYCLE_BACKOFF = 300.0
+_STATUS_CONNECTION_TIMEOUT = 5.0
 _BOOTSTRAP_PROTOCOLS = (
     ("3.4", 3.4, False),
     ("3.3", 3.3, False),
@@ -78,6 +80,7 @@ class EmerioDevice:
         self._monitor_device: Any | None = None
         self._monitor_registered = False
         self._bootstrap_protocol_index = 0
+        self.bootstrap_cycle_exhausted = False
         self._active_protocol = PROTOCOL_VERSION
         self._active_device22 = False
         self._poll_task: asyncio.Task[None] | None = None
@@ -112,7 +115,7 @@ class EmerioDevice:
         """Create the persistent monitor without changing the poll task."""
 
         self._monitor_device = self._new_tuya_device(
-            timeout=3.0,
+            timeout=_STATUS_CONNECTION_TIMEOUT,
             persist=True,
             protocol_version=self._active_protocol,
             force_device22=self._active_device22,
@@ -231,7 +234,12 @@ class EmerioDevice:
         if not self._monitor_registered or not self.monitor_connected:
             if self._monitor_registered:
                 await self._async_recover_monitor_status()
-            elif not await self._async_bootstrap_then_monitor():
+            else:
+                self.bootstrap_cycle_exhausted = False
+            if (
+                not self._monitor_registered
+                and not await self._async_bootstrap_then_monitor()
+            ):
                 raise EmerioCommunicationError(
                     self.last_error or "Statusabfrage: Gerät lieferte keine Datenpunkte"
                 )
@@ -307,6 +315,7 @@ class EmerioDevice:
 
         self._active_protocol = protocol_version
         self._active_device22 = force_device22
+        self.bootstrap_cycle_exhausted = False
         self.last_status_protocol = protocol_label
         self._apply_device_dps(dps)
         return await self._async_start_monitor_transport()
@@ -322,9 +331,10 @@ class EmerioDevice:
         return _BOOTSTRAP_PROTOCOLS[self._bootstrap_protocol_index]
 
     def _advance_bootstrap_protocol(self) -> None:
-        self._bootstrap_protocol_index = (self._bootstrap_protocol_index + 1) % len(
-            _BOOTSTRAP_PROTOCOLS
-        )
+        next_index = (self._bootstrap_protocol_index + 1) % len(_BOOTSTRAP_PROTOCOLS)
+        self._bootstrap_protocol_index = next_index
+        if next_index == 0:
+            self.bootstrap_cycle_exhausted = True
 
     async def async_wait_for_device_dp(
         self, dp: int, expected: Any, timeout: float = 2.0
@@ -504,7 +514,11 @@ class EmerioDevice:
                 interval = (
                     _POLL_INTERVAL
                     if self._monitor_registered
-                    else _BOOTSTRAP_RETRY_INTERVAL
+                    else (
+                        _BOOTSTRAP_CYCLE_BACKOFF
+                        if self.bootstrap_cycle_exhausted
+                        else _BOOTSTRAP_RETRY_INTERVAL
+                    )
                 )
                 await asyncio.sleep(interval)
                 await self._async_poll_once()
@@ -525,6 +539,7 @@ class EmerioDevice:
                 return
             return
 
+        self.bootstrap_cycle_exhausted = False
         await self._async_bootstrap_then_monitor()
 
     def _write_dps_sync(self, dps: dict[int, Any]) -> None:
@@ -548,7 +563,7 @@ class EmerioDevice:
         """Fetch initial DPS on a fresh connection, allowing device22 detection."""
 
         device = self._new_tuya_device(
-            timeout=3.0,
+            timeout=_STATUS_CONNECTION_TIMEOUT,
             persist=False,
             protocol_version=protocol_version,
             force_device22=force_device22,

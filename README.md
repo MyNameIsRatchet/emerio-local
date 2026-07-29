@@ -124,11 +124,12 @@ Klimagerät. `optimistic` bedeutet: Home Assistant zeigt vorübergehend den zule
 gesendeten Wert, weil noch keine auswertbare Rückmeldung eingetroffen ist.
 
 Bis zur ersten echten Statusantwort probiert die Integration mit mindestens fünf
-Sekunden Abstand jeweils eine Protokollvariante über eine frische Verbindung.
-Der bekannte 3.4-Befehlspfad bleibt während dieser rein lesenden Erkennung
-unverändert. Danach lauscht sie auf spontane Meldungen und fragt über denselben
-persistenten Socket höchstens einmal alle 30 Sekunden nach. Nach Befehlen wartet
-sie passiv auf die von Tuya vorgesehene Zustandsmeldung.
+Sekunden Abstand jeweils eine Protokollvariante über eine frische Verbindung und
+wartet dabei wie `tuya-local` bis zu fünf Sekunden auf die Antwort. Bleibt ein
+vollständiger Zyklus erfolglos, pausiert die Erkennung fünf Minuten. Der bekannte
+3.4-Befehlspfad bleibt während dieser rein lesenden Erkennung unverändert.
+Danach lauscht die Integration auf spontane Meldungen und fragt über denselben
+persistenten Socket höchstens einmal alle 30 Sekunden nach.
 
 ## Logging
 
