@@ -451,26 +451,34 @@ class EmerioDevice:
         try:
             while True:
                 await asyncio.sleep(_POLL_INTERVAL)
-                if self._monitor_registered:
-                    self._schedule_status_sequence()
-                    continue
-
-                async with self._monitor_lock:
-                    if self._monitor_registered:
-                        continue
-                    try:
-                        dps = await self.hass.async_add_executor_job(
-                            self._refresh_sync
-                        )
-                    except Exception as err:
-                        self.command_reachable = False
-                        self.last_error = f"Statusabfrage: {err}"
-                        self._notify()
-                        continue
-                    self._apply_device_dps(dps)
-                    await self._async_start_monitor_transport()
+                await self._async_poll_once()
         except asyncio.CancelledError:
             raise
+
+    async def _async_poll_once(self) -> None:
+        """Poll once and restore the monitor even for status-blind firmware."""
+
+        if self._monitor_registered:
+            self._schedule_status_sequence()
+            return
+
+        async with self._monitor_lock:
+            if self._monitor_registered:
+                return
+            try:
+                dps = await self.hass.async_add_executor_job(self._refresh_sync)
+            except Exception as err:
+                self.command_reachable = False
+                self.last_error = f"Statusabfrage: {err}"
+                self._notify()
+                # This firmware can complete the 3.4 handshake and accept
+                # commands while its synchronous status query still times out.
+                # Reopen the passive monitor regardless so later pushes and
+                # control responses remain observable.
+                await self._async_start_monitor_transport()
+                return
+            self._apply_device_dps(dps)
+            await self._async_start_monitor_transport()
 
     def _write_dps_sync(self, dps: dict[int, Any]) -> None:
         device = self._new_tuya_device(timeout=3.0, persist=False)
