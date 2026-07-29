@@ -26,6 +26,19 @@ _DEVICE_TYPE_DEFAULT = "default"
 _DEVICE_TYPE_22 = "device22"
 _RETRYABLE_STATUS_ERROR_CODES = frozenset({"902", "908", "no_dps"})
 
+# TinyTuya's device22 query serializes the requested DPS as a JSON object.
+# Asking for every known Emerio DP produces a 204-byte plaintext payload. The
+# PAC-127111.1 silently drops that request even though it accepts smaller
+# control frames. Keep every status request small and put power plus both
+# temperatures first so Home Assistant receives the card's core state first.
+_DEVICE22_STATUS_GROUPS = (
+    (1, 2, 3),
+    (1, 20, 101),
+    (1, 103, 104),
+    (1, 105, 109),
+    (1, 110, 111),
+)
+
 
 class EmerioCommunicationError(HomeAssistantError):
     """Raised when a local command cannot be placed on the wire."""
@@ -112,7 +125,9 @@ class EmerioDevice:
         """Create the persistent monitor without changing the poll task."""
 
         monitor_device = self._new_tuya_device(timeout=3.0, persist=True)
-        monitor_device.set_dpsUsed({str(dp): None for dp in KNOWN_DPS})
+        monitor_device.set_dpsUsed(
+            _dps_request(_status_request_groups(self.device_type)[0])
+        )
         monitor = tinytuya.Monitor(
             on_status=self._monitor_status_callback,
             on_connect=self._monitor_connect_callback,
@@ -136,7 +151,8 @@ class EmerioDevice:
             self.command_reachable = False
             self.last_error = f"Dauerverbindung: {err}"
             _LOGGER.warning(
-                "Persistent session to %s failed; command fallback remains available: %s",
+                "Persistent session to %s failed; "
+                "command fallback remains available: %s",
                 self.host,
                 err,
             )
@@ -480,14 +496,14 @@ class EmerioDevice:
         try:
             if initial_delay:
                 await asyncio.sleep(initial_delay)
-            if not self.monitor_connected:
-                return
-            self._queue_monitor_command("status")
-            await asyncio.sleep(_STATUS_REQUEST_SPACING)
-            if not self.monitor_connected:
-                return
-            self._queue_monitor_command("status")
-            await asyncio.sleep(_STATUS_REQUEST_SPACING)
+
+            for group in _status_request_groups(self.device_type):
+                if not self.monitor_connected:
+                    return
+                self._queue_monitor_command("set_dpsUsed", _dps_request(group))
+                self._queue_monitor_command("status")
+                await asyncio.sleep(_STATUS_REQUEST_SPACING)
+
             if self.monitor_connected:
                 self._queue_monitor_command("updatedps", list(KNOWN_DPS))
         except asyncio.CancelledError:
@@ -549,7 +565,10 @@ class EmerioDevice:
                 device_type=device_type,
             )
             try:
-                device.set_dpsUsed({str(dp): None for dp in KNOWN_DPS})
+                # The Emerio firmware silently ignores an all-DPS device22
+                # request. The first compact group contains everything the
+                # standard climate card needs for power and temperature.
+                device.set_dpsUsed(_dps_request(_status_request_groups(device_type)[0]))
                 result = device.status()
                 _raise_for_tuya_error(result)
                 dps = _extract_dps(result)
@@ -625,6 +644,20 @@ def _device_type_candidates(preferred: str) -> tuple[str, str]:
         _DEVICE_TYPE_DEFAULT if preferred == _DEVICE_TYPE_22 else _DEVICE_TYPE_22
     )
     return preferred, alternate
+
+
+def _status_request_groups(device_type: str) -> tuple[tuple[int, ...], ...]:
+    """Return firmware-sized DPS groups for the selected query format."""
+
+    if device_type == _DEVICE_TYPE_22:
+        return _DEVICE22_STATUS_GROUPS
+    return (KNOWN_DPS,)
+
+
+def _dps_request(dps: tuple[int, ...]) -> dict[str, None]:
+    """Build TinyTuya's device22 DPS request mapping."""
+
+    return {str(dp): None for dp in dps}
 
 
 def validate_local_key(local_key: str) -> None:
