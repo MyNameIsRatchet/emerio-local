@@ -301,8 +301,10 @@ class EmerioDevice:
         if self._monitor is None or self._monitor_device is None:
             raise EmerioCommunicationError("Monitor wurde nicht initialisiert")
         handle = self._monitor.add(self._monitor_device)
-        if isinstance(handle, str):
-            raise EmerioCommunicationError(handle)
+        if not callable(getattr(handle, "set_multiple_values", None)):
+            raise EmerioCommunicationError(
+                f"Monitor-Registrierung fehlgeschlagen: {handle!r}"
+            )
         self._monitor.start()
 
     def _stop_monitor_sync(self) -> None:
