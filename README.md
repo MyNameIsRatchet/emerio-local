@@ -14,11 +14,13 @@ synchrone Tuya-Statusabfrage aber nicht zuverlässig. Andere Integrationen warte
 auf genau diese Antwort, markieren das Gerät als offline oder verlieren nach
 einem ausgeführten Befehl den Zustand.
 
-Emerio Local hält stattdessen eine Tuya-3.4-Verbindung offen. Befehle,
-Control-Antworten, spontane Push-Meldungen und Statusanfragen laufen dadurch über
-denselben Socket. Erkannte Datenpunkte werden als echter Gerätestatus nach Home
-Assistant übernommen. Nach einem Befehl fragt die Integration zusätzlich im
-normalen und im von TinyTuya erkannten `device22`-Format nach.
+Emerio Local hält stattdessen genau eine persistente Tuya-3.4-Verbindung offen.
+Befehle, Control-Antworten, spontane Push-Meldungen und Statusanfragen laufen
+dadurch über denselben Socket. Ein Heartbeat hält ihn aktiv; höchstens eine
+Statusabfrage pro 30-Sekunden-Zyklus verhindert belastende Abfrage-Bursts.
+TinyTuya verwendet bei späteren Abfragen automatisch das erkannte `device22`-
+Format. Erkannte Datenpunkte werden als echter Gerätestatus nach Home Assistant
+übernommen.
 
 Nur bis eine echte Rückmeldung eintrifft, zeigt Home Assistant den gesendeten
 Wert als **optimistischen/angenommenen Zustand**. Das verhindert, dass die UI
@@ -37,6 +39,8 @@ Ausschaltbefehl mehr anbietet.
   Refresh-Token existieren nur während des Einrichtungsdialogs.
 - **Verlässliche Tuya-3.4-Verbindung:** Eine persistente Verbindung verarbeitet
   Befehlsantworten und spontane Gerätemeldungen über denselben Socket.
+- **Schonende Statusabfrage:** Keine zusätzlichen Sockets und keine
+  Status-Bursts nach Befehlen; Heartbeats halten die einzige Verbindung offen.
 - **Vollständige Klimasteuerung:** Ein/Aus, Kühlen, Entfeuchten, Nur Lüften,
   16–31 °C Zieltemperatur sowie hohe und niedrige Lüfterstufe.
 - **Zusatzfunktionen:** Schlafmodus, Timer von 0–24 Stunden und separater
@@ -116,11 +120,12 @@ mit dem Klimagerät; für den Betrieb ist keine Tuya-Cloud-Verbindung erforderli
 Klimagerät. `optimistic` bedeutet: Home Assistant zeigt vorübergehend den zuletzt
 gesendeten Wert, weil noch keine auswertbare Rückmeldung eingetroffen ist.
 
-Die Integration lauscht auf spontane Meldungen und fragt alle 30 Sekunden sowie
-nach jedem Befehl nach. Ob die spezielle Emerio-Firmware ihre Datenpunkte auf
-dieser dauerhaften Verbindung vollständig liefert, muss einmal am echten Gerät
-getestet werden. Die Bedienung bleibt auch dann möglich, wenn nur der
-optimistische Fallback funktioniert.
+Die Integration lauscht auf spontane Meldungen und fragt über denselben
+persistenten Socket höchstens einmal alle 30 Sekunden nach. Nach Befehlen wartet
+sie passiv auf die von Tuya vorgesehene Zustandsmeldung. Ob die spezielle
+Emerio-Firmware ihre Datenpunkte auf dieser dauerhaften Verbindung vollständig
+liefert, muss einmal am echten Gerät getestet werden. Die Bedienung bleibt auch
+dann möglich, wenn nur der optimistische Fallback funktioniert.
 
 ## Logging
 
